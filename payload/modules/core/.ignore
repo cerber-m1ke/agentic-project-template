@@ -1,0 +1,2 @@
+# Let ripgrep (and agents that search with it) see Resources/ despite .gitignore; nested .gitignore files still apply.
+!/Resources/*

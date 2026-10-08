@@ -1,0 +1,258 @@
+"""tb resources — catalog of the project's resources (Resources/resources.toml) and their clones.
+
+Each `[[resource]]` has `name` (directory in Resources/), `kind` (git | folder), `url`,
+optional `branch`, `description`, `entity`. Git resources are cloned into Resources/<name>/,
+which the root repository ignores.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+import common
+
+RESOURCES_DIR = "Resources"
+CATALOG = f"{RESOURCES_DIR}/resources.toml"
+RESERVED = {"readme.md", "resources.toml"}
+KINDS = ("git", "folder")
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+# --- CLI --------------------------------------------------------------------------------
+
+def register(sub: argparse._SubParsersAction) -> None:
+    parser = sub.add_parser("resources", help="project resources: status | clone | add",
+                            description=f"Resources catalogued in {CATALOG}.")
+    actions = parser.add_subparsers(dest="resources_action", metavar="<action>")
+    actions.add_parser("status", help="catalog entries: cloned?, branch, changes") \
+        .set_defaults(func=cmd_status)
+    p = actions.add_parser("clone", help="clone catalogued git resources into Resources/")
+    p.add_argument("names", nargs="*", metavar="name")
+    p.add_argument("--all", action="store_true", help="clone every git resource not cloned yet")
+    p.set_defaults(func=cmd_clone)
+    p = actions.add_parser("add", help=f"add a resource to {CATALOG}")
+    p.add_argument("url", help="repository URL (git) or source location (folder)")
+    p.add_argument("--name", help="directory name in Resources/ (default: from the URL)")
+    p.add_argument("--branch", help="branch to clone")
+    p.add_argument("--kind", choices=KINDS, default="git", help="git (default) or folder")
+    p.add_argument("--description", help="what the resource is")
+    p.add_argument("--clone", action="store_true", help="clone it right away (git only)")
+    p.set_defaults(func=cmd_add)
+    parser.set_defaults(func=lambda _args: (parser.print_help(), 0)[1])
+
+
+def cmd_status(_args: argparse.Namespace) -> int:
+    _missing, ok = print_status()
+    return 0 if ok else 1
+
+
+def cmd_clone(args: argparse.Namespace) -> int:
+    if not args.names and not args.all:
+        return common.fail("name the resources to clone, or use --all")
+    return clone(args.names, all_missing=args.all)
+
+
+def cmd_add(args: argparse.Namespace) -> int:
+    return add(args.url, name=args.name, branch=args.branch, kind=args.kind,
+               description=args.description, do_clone=args.clone)
+
+
+# --- catalog ---------------------------------------------------------------------------------
+
+def load_catalog() -> tuple[list[dict[str, Any]], str | None]:
+    """Valid catalog entries and an error message (None if the catalog is readable or absent)."""
+    path = common.project_root() / CATALOG
+    if not path.is_file():
+        return [], None
+    try:
+        data = common.load_toml(path)
+    except (OSError, ValueError) as exc:
+        return [], f"{CATALOG}: {exc}"
+    entries: list[dict[str, Any]] = []
+    for i, item in enumerate(data.get("resource", []), 1):
+        name = item.get("name") if isinstance(item, dict) else None
+        if not isinstance(name, str) or not _NAME_RE.match(name):
+            common.warn(f"{CATALOG}: resource #{i} has no valid `name`; skipped")
+            continue
+        if item.get("kind", "git") not in KINDS:
+            common.warn(f"{CATALOG}: {name}: unknown kind {item.get('kind')!r} (git | folder)")
+        entries.append(item)
+    return entries, None
+
+
+def _resource_dir(name: str) -> Path:
+    return common.project_root() / RESOURCES_DIR / name
+
+
+def _git_state(path: Path) -> tuple[str, str]:
+    """(branch, changes) of a cloned resource."""
+    branch = common.git("rev-parse", "--abbrev-ref", "HEAD", cwd=path).stdout.strip()
+    if branch == "HEAD":
+        sha = common.git("rev-parse", "--short", "HEAD", cwd=path).stdout.strip()
+        branch = f"detached@{sha}"
+    status = common.git("status", "--porcelain", cwd=path)
+    if status.returncode != 0:
+        return branch or "?", "git status failed"
+    count = len([line for line in status.stdout.splitlines() if line.strip()])
+    return branch or "?", f"dirty ({count} change{'s' if count != 1 else ''})" if count else "clean"
+
+
+def print_status() -> tuple[list[str], bool]:
+    """Print the status table. Returns (missing git resources, catalog readable)."""
+    entries, error = load_catalog()
+    if error:
+        common.fail(error)
+        return [], False
+    root = common.project_root()
+    missing: list[str] = []
+    rows: list[tuple[str, ...]] = []
+    for entry in entries:
+        name, kind = entry["name"], entry.get("kind", "git")
+        path = _resource_dir(name)
+        if not path.is_dir():
+            if kind == "git":
+                missing.append(name)
+                rows.append((name, kind, "missing", "", f"Toolbox/tb resources clone {name}"))
+            else:
+                rows.append((name, kind, "missing", "", f"copy it into {RESOURCES_DIR}/{name}/"))
+        elif kind == "git" and not (path / ".git").exists():
+            rows.append((name, kind, "present", "", "not a git repository"))
+        elif kind == "git":
+            branch, changes = _git_state(path)
+            expected = entry.get("branch")
+            if expected and branch != expected:
+                changes += f", catalog branch: {expected}"
+            rows.append((name, kind, "cloned", branch, changes))
+        else:
+            rows.append((name, kind, "present", "", ""))
+
+    if not (root / CATALOG).is_file():
+        common.out(f"No catalog: {CATALOG} not found.")
+    elif not rows:
+        common.out(f"No resources in {CATALOG}.")
+    else:
+        common.out(f"{CATALOG}: {len(rows)} resource(s)")
+        widths = [max(len(row[i]) for row in rows) for i in range(4)]
+        for row in rows:
+            cells = [cell.ljust(widths[i]) for i, cell in enumerate(row[:4])] + [row[4]]
+            common.out("  " + "  ".join(cells).rstrip())
+
+    known = {entry["name"].lower() for entry in entries}
+    base = root / RESOURCES_DIR
+    extra = sorted(p.name for p in base.iterdir()
+                   if p.is_dir() and not p.name.startswith(".") and p.name.lower() not in known) \
+        if base.is_dir() else []
+    if extra:
+        common.out(f"Not in the catalog: {', '.join(n + '/' for n in extra)} "
+                   f"— add with Toolbox/tb resources add <url> --name <name>")
+    if missing:
+        common.out(f"Not cloned: {len(missing)} — Toolbox/tb resources clone --all")
+    return missing, True
+
+
+# --- clone / add ----------------------------------------------------------------------------
+
+def clone(names: list[str], all_missing: bool = False) -> int:
+    entries, error = load_catalog()
+    if error:
+        return common.fail(error)
+    by_name = {entry["name"]: entry for entry in entries}
+    if all_missing:
+        names = list(dict.fromkeys(names + [
+            e["name"] for e in entries
+            if e.get("kind", "git") == "git" and not _resource_dir(e["name"]).exists()]))
+        if not names:
+            common.out("All git resources are cloned.")
+            return 0
+    code = 0
+    for name in names:
+        entry = by_name.get(name)
+        if entry is None:
+            code = common.fail(f"unknown resource {name!r} (catalog: {', '.join(by_name) or 'empty'})")
+            continue
+        dest = _resource_dir(name)
+        shown = f"{RESOURCES_DIR}/{name}/"
+        if entry.get("kind", "git") != "git":
+            common.warn(f"{name}: folder resource — copy it into {shown} by hand")
+            continue
+        if dest.exists():
+            common.out(f"{name}: already present in {shown}, skipped")
+            continue
+        url = str(entry.get("url") or "")
+        if not url:
+            code = common.fail(f"{name}: no `url` in {CATALOG}")
+            continue
+        branch = entry.get("branch")
+        cmd = ["git", "clone", *(["--branch", str(branch)] if branch else []), "--", url, str(dest)]
+        common.out(f"{name}: cloning {url}{f' ({branch})' if branch else ''} into {shown}")
+        sys.stdout.flush()
+        # Not captured: the user sees progress and credential prompts.
+        result = subprocess.run(cmd, cwd=common.project_root())
+        if result.returncode != 0:
+            code = common.fail(f"{name}: git clone failed (exit {result.returncode})")
+        else:
+            common.out(f"  ✓ cloned {shown}")
+    return code
+
+
+def name_from_url(url: str) -> str:
+    tail = re.split(r"[/\\:]", url.strip().rstrip("/\\"))[-1]
+    return tail[:-4] if tail.lower().endswith(".git") else tail
+
+
+def _toml_line(key: str, value: str) -> str:
+    return common.dump_toml({key: value}).strip()
+
+
+def add(url: str, name: str | None = None, branch: str | None = None, kind: str = "git",
+        description: str | None = None, do_clone: bool = False) -> int:
+    name = name or name_from_url(url)
+    if not _NAME_RE.match(name) or name.lower() in RESERVED:
+        return common.fail(f"invalid resource name {name!r} — pass --name "
+                           "(letters, digits, '.', '_', '-')")
+    entries, error = load_catalog()
+    if error:
+        return common.fail(error)
+    for entry in entries:
+        if entry["name"].lower() == name.lower():
+            return common.fail(f"resource {entry['name']!r} is already in {CATALOG}")
+        if entry.get("url") == url:
+            return common.fail(f"{url} is already in {CATALOG} as {entry['name']!r}")
+
+    lines = ["[[resource]]", _toml_line("name", name), _toml_line("kind", kind), _toml_line("url", url)]
+    if branch:
+        lines.append(_toml_line("branch", branch))
+    if description:
+        lines.append(_toml_line("description", description))
+
+    path = common.project_root() / CATALOG
+    existed = path.is_file()
+    original = common.read_text(path) if existed else ""
+    text = original
+    if text and not text.endswith("\n"):
+        text += "\n"
+    if text.strip():
+        text += "\n"
+    common.write_text(path, text + "\n".join(lines) + "\n")
+    try:
+        common.load_toml(path)
+    except ValueError as exc:
+        if existed:
+            common.write_text(path, original)
+        else:
+            path.unlink()
+        return common.fail(f"{CATALOG} would become invalid ({exc}); left unchanged")
+    common.out(f"Added {name!r} to {CATALOG}.")
+    if do_clone:
+        if kind != "git":
+            common.warn(f"{name}: --clone works for git resources only")
+            return 0
+        return clone([name])
+    if kind == "git":
+        common.out(f"Clone it: Toolbox/tb resources clone {name}")
+    return 0

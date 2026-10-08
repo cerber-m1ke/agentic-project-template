@@ -1,0 +1,26 @@
+# MCP servers of the project in a canonical, agent-neutral form. `Toolbox/tb agents link`
+# renders them for every agent linked on this machine (Claude Code: .mcp.json,
+# Codex: [mcp_servers.<name>] in .codex/config.toml). Run it again after editing this file.
+#
+# This file is committed to git: never put secrets here.
+#
+# Schema — one table per server; a server has either `command` (stdio) or `url` (http):
+#
+#   [servers.<name>]
+#   command = "…"              # stdio: executable
+#   args = ["…"]               # stdio: arguments (optional)
+#   env = { KEY = "value" }    # stdio: environment variables (optional)
+#
+#   [servers.<name>]
+#   url = "https://…"          # http: endpoint
+#   headers = { KEY = "value" }  # http: request headers (optional)
+#
+# Examples (uncomment and adapt):
+#
+# [servers.filesystem]
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "Knowledge"]
+#
+# [servers.docs]
+# url = "https://example.com/mcp"
+# headers = { X-Client = "agentic-project" }

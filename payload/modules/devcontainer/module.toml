@@ -1,0 +1,8 @@
+name = "devcontainer"
+description = "Dev container (.devcontainer/) with agent CLIs and uv for sandboxed agent runs"
+required = false
+default = false
+seeded = []
+block = []
+executable = []
+post_install = []

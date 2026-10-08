@@ -1,0 +1,8 @@
+name = "obsidian"
+description = "Obsidian vault configuration for Knowledge/ on this machine"
+required = false
+default = true
+seeded = []
+block = []
+executable = []
+post_install = [["obsidian", "setup"]]

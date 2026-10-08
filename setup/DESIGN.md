@@ -1,6 +1,6 @@
 # Agentic Project Setup — проектный документ
 
-> Статус: черновик v0.2 · 2026-10-08
+> Статус: черновик v0.3 · 2026-10-08
 >
 > Документ фиксирует архитектурные решения шаблона и служит основой для README, инструкций и реализации.
 > Всё, что записано в разделах 1–15, — принятые решения. Непроверенное и несогласованное вынесено
@@ -95,6 +95,7 @@
 ├── .gitignore  .gitattributes  .ignore
 ├── .agents/                  # системное, источник правды
 │   ├── agentic.lock          # происхождение из шаблона, профиль, модули, хэши управляемых файлов
+│   ├── local.toml            # настройки этой машины (подключённые агенты), не в git
 │   ├── skills/               # процедуры (стандарт Agent Skills)
 │   ├── agents/               # субагенты в каноническом формате
 │   ├── hooks/                # hooks.toml с абстрактными событиями + скрипты
@@ -183,7 +184,8 @@ agentic-project-template/
 | `obsidian` | Настройка хранилища на машине |
 | `devcontainer` | Опционально, см. [§10.5](#105-docker-модуль-devcontainer) |
 
-Набор профилей v1 — открытый вопрос.
+Профили v1: `software` и `generic`. Набор модулей у них одинаковый, различается фрагмент правил
+в `AGENTS.md` (`setup/profiles/<profile>.<lang>.md`).
 
 ### 5.4. Хостинг и версии
 
@@ -376,7 +378,7 @@ entity = "Knowledge/Entities/api.md"
   Вложенные инструкции разные агенты подхватывают по-разному, поэтому это правило записано явно.
 - Задача хранит, какие ресурсы и ветки она затрагивает (поле `resources`).
 - **Видимость для поиска:** `Resources/*` игнорируется корневым git, а поиск агентов (ripgrep) уважает
-  `.gitignore`. Лечится разрешающим правилом в `.ignore` — проверить на пилоте.
+  `.gitignore`. Лечится разрешающим правилом `!/Resources/*` в `.ignore` ([§16](#16-открытые-вопросы), вопрос 1).
 
 ## 9. Знания
 
@@ -472,7 +474,10 @@ Toolbox — инструменты проекта и слой независим
   2. иначе скачать закреплённую версию в `Runtime/tools/uv/` и проверить sha256. На Windows 10+ хватает
      встроенных `curl.exe`, `tar.exe` и `certutil`; PowerShell, если понадобится, вызывается только
      с `-ExecutionPolicy Bypass`;
-  3. выставить `UV_PYTHON_INSTALL_DIR=Runtime/tools/python` и `UV_CACHE_DIR=Runtime/cache/uv`;
+  3. выставить, если не заданы пользователем, `UV_PYTHON_INSTALL_DIR=Runtime/tools/python`,
+     `UV_PYTHON_BIN_DIR=Runtime/tools/python-bin`, `UV_CACHE_DIR=Runtime/cache/uv` и
+     `UV_PYTHON_PREFERENCE=only-managed`. Без `UV_PYTHON_BIN_DIR` uv кладёт ссылку на Python
+     в `~/.local/bin` — это проверено на практике;
   4. запустить инструмент через `uv run`.
 - Глобально ничего не ставится, права администратора не нужны. Удаление `Runtime/` удаляет среду,
   следующий вызов `tb` восстанавливает её.
@@ -544,34 +549,45 @@ Docker не основной способ запуска Toolbox:
 
 ### 11.3. Манифест адаптера
 
-`.agents/adapters/<agent>/adapter.toml` описывает, как агент видит систему. Пример (схема уточняется
-при реализации):
+`.agents/adapters/<agent>/adapter.toml` описывает, как агент видит систему. Сокращённый манифест Claude
+(полная версия — в payload):
 
 ```toml
 name = "claude"
+title = "Claude Code"
 tier = 3
-instructions = "native"          # читает AGENTS.md сам; иначе — сгенерировать заглушку
+instructions = "native"                  # читает AGENTS.md сам; иначе — сгенерировать заглушку
+outputs = ["/.claude/", "/.mcp.json"]    # должны быть в управляемом блоке .gitignore
 
 [skills]
-mode = "link"                    # native | link | none
+mode = "link"                            # native | link | none
 target = ".claude/skills"
+granularity = "per-skill"                # .claude/skills/<name> → .agents/skills/<name>
 
 [subagents]
 target = ".claude/agents"
 models = { fast = "haiku", balanced = "sonnet", strong = "opus" }
+tools = { read-only = "Read, Grep, Glob", shell = "Read, Grep, Glob, Bash", edit = "Read, Grep, Glob, Bash, Edit, Write" }
 
 [hooks]
 target = ".claude/settings.json"
+command = '"$CLAUDE_PROJECT_DIR"/Toolbox/tb hook {name} --agent claude'
 events = { session-start = "SessionStart", prompt-submit = "UserPromptSubmit", before-tool = "PreToolUse", after-tool = "PostToolUse", stop = "Stop" }
 
-[mcp]
-target = ".mcp.json"
+[permissions]
+target = ".claude/settings.json"
+allow = ["Bash(Toolbox/tb kb *)", "Bash(Toolbox/tb version)", "Bash(Toolbox/tb agents doctor)"]
 
 [memory]
-disable = true                   # отключить встроенную память агента
+target = ".claude/settings.json"
+disable = true                           # autoMemoryEnabled = false
 
-outputs = [".claude/", ".mcp.json"]   # попадают в .gitignore
+[mcp]
+target = ".mcp.json"                     # создаётся, только если в .agents/mcp.toml есть серверы
 ```
+
+Сгенерированные файлы зависят от машины (у Codex хуки вызываются по абсолютному пути проекта), поэтому
+после переноса папки проекта нужно повторить `tb agents link`. `tb agents doctor` сообщает об этом.
 
 Генераторы форматов лежат в `Toolbox/agentic/adapters/`.
 
@@ -593,10 +609,19 @@ outputs = [".claude/", ".mcp.json"]   # попадают в .gitignore
 
 ### 11.6. Стартовые адаптеры
 
-- **claude** — уровень 3. `AGENTS.md` читает сам (если нет `CLAUDE.md`). Skills видит через ссылку
-  `.claude/skills`. Субагенты, хуки и MCP генерируются, встроенная авто-память отключается.
-- **codex** — `AGENTS.md` и `.agents/skills` читает нативно. Поддержку субагентов, хуков, проектного
-  конфига и MCP уточняем при реализации.
+- **claude** — уровень 3.
+  - `AGENTS.md` читает сам (если нет `CLAUDE.md`, `.claude/CLAUDE.md` и `CLAUDE.local.md`).
+  - Skills видит через ссылку на каждый skill: `.claude/skills/<name>` → `.agents/skills/<name>`. Такие
+    ссылки документированы, а ссылка на весь каталог — нет.
+  - Генерируются `.claude/settings.json` (авто-память выключена через `autoMemoryEnabled: false`,
+    разрешения на читающие команды `tb`, хуки), `.claude/agents/*.md` и `.mcp.json`.
+  - Личные настройки Claude — в `.claude/settings.local.json`: генератор его не трогает.
+- **codex** — уровень 3.
+  - `AGENTS.md` и `.agents/skills` читает нативно, ссылки не нужны.
+  - Генерируются `.codex/config.toml` (MCP, `[features] memories = false`), `.codex/hooks.json`
+    и `.codex/agents/*.toml`.
+  - Проектный `.codex/` читается только для доверенных (trusted) проектов. Новые хуки человек один раз
+    одобряет в `/hooks`.
 
 ## 12. Контекст и библиотекарь
 
@@ -717,22 +742,38 @@ outputs = [".claude/", ".mcp.json"]   # попадают в .gitignore
 
 ## 16. Открытые вопросы
 
-1. **Профили v1.** Предложение: `software` (ресурсы — git-репозитории с кодом) и `generic` (минимальный набор
-   для проектов без кода: документация, исследования). Нужен список типов проектов, которые предвидятся.
-2. **ripgrep и `Resources/*`.** Работает ли разрешающее правило в `.ignore` для поиска Claude (Grep/Glob)
+1. **ripgrep и `Resources/*`.** Сам ripgrep 15 видит ресурсы с правилом `!/Resources/*` в `.ignore`
+   (вариант `!/Resources/` не работает). Осталось проверить на пилоте встроенный поиск Claude (Grep/Glob)
    и Codex.
-3. **Worktree и параллельные сессии.** Worktree корневого репозитория не содержит ресурсов, а Claude desktop
+2. **Worktree и параллельные сессии.** Worktree корневого репозитория не содержит ресурсов, а Claude desktop
    создаёт такие worktree для сессий. Варианты:
    - worktree внутри ресурсов;
    - ссылки на ресурсы при создании worktree;
    - отказ от worktree-режима на уровне корня.
-4. **Codex.** Уточнить текущую поддержку субагентов, хуков, проектного конфига, MCP и встроенной памяти.
-5. **Claude Code.** Точный ключ отключения авто-памяти. Как обнаруживаются skills через ссылку на каталог
-   (запасной вариант — ссылка на каждый skill).
-6. **Пороги устаревания** по типам заметок для `tb kb stale`.
-7. **Хуки v1.** Кандидаты: `prompt-submit` → подстановка результатов `kb`, `stop` → напоминание о `wrap-up`.
+3. **Windows.** `tb.cmd`, `init.cmd`, junction и хуки на Windows написаны, но не запускались. Проверить на пилоте.
 
-Закрыты: хостинг и версии ([§5.4](#54-хостинг-и-версии)), язык ([§5.5](#55-языки)).
+**Закрытые вопросы:**
+
+- **Хостинг и версии** — [§5.4](#54-хостинг-и-версии).
+- **Язык** — [§5.5](#55-языки).
+- **Профили v1** — `software` (ресурсы — git-репозитории с кодом) и `generic` (проекты без кода:
+  документация, исследования). Они различаются только фрагментом правил в `AGENTS.md`.
+- **Codex и Claude Code** — возможности исследованы, см. [§11.6](#116-стартовые-адаптеры) и
+  [Приложение А](#приложение-а-проверенные-факты-об-агентах).
+- **Пороги устаревания** (дни с `verified`, иначе с `created`):
+
+  | Заметки | Порог |
+  |---|---|
+  | gotcha | 90 |
+  | entity, example | 180 |
+  | plan (`idea`, `ready`) | 60 |
+  | task (`active`, `blocked`) | 30 |
+  | decision (`proposed`) | 30 |
+
+  Задача в статусе `done` попадает в отчёт всегда как ожидающая сбора итогов. Порог можно переопределить
+  флагом `tb kb stale --days`.
+- **Хуки v1** — только `prompt-submit` → `kb-suggest`: подставляет в контекст заголовки и пути подходящих
+  заметок. Напоминание о `wrap-up` на `stop` отклонено: это событие срабатывает после каждого ответа агента.
 
 ## 17. План реализации
 
@@ -745,7 +786,7 @@ outputs = [".claude/", ".mcp.json"]   # попадают в .gitignore
 4. Знания: README каталогов, шаблоны заметок, `tb kb` (`search`, `new`, `lint`, `index`, `stale`).
 5. Адаптеры `claude` и `codex`; `tb agents link`, `tb agents doctor`.
 6. Skills `kb-lookup` + субагент `librarian`, `wrap-up`, `kb-commit`, `kb-review`; инструкция `setup/INIT.md`.
-7. Пилот: adopt реального проекта, проверка на macOS и Windows, закрытие открытых вопросов 2–5.
+7. Пилот: adopt реального проекта, проверка на macOS и Windows, закрытие открытых вопросов 1–3.
 8. Английская версия: перевод payload и `README.en.md`, `setup/i18n_check.py`.
 9. Публикация: публичный репозиторий на GitHub, релиз `v0.1.0`.
 10. Обновление: `agentic-update`, `update.py`, миграции. Проверяется выпуском `v0.2.0`.
@@ -769,3 +810,28 @@ outputs = [".claude/", ".mcp.json"]   # попадают в .gitignore
 - Единого формата хуков нет: у каждого агента свой конфиг и свои события.
   [Сравнение систем хуков](https://lilting.ch/en/articles/gemini-cli-hooks-research),
   [Cursor: third-party hooks](https://cursor.com/docs/reference/third-party-hooks)
+
+**Claude Code** ([документация](https://code.claude.com/docs/en/)):
+
+- Авто-память выключается ключом `autoMemoryEnabled: false` в настройках проекта или переменной
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (memory.md).
+- Skill в `.claude/skills/<name>` может быть ссылкой на каталог в другом месте (skills.md).
+- Субагенты: `.claude/agents/<name>.md`, frontmatter `name`, `description`, `tools`, `model`
+  (`haiku`, `sonnet`, `opus`, `inherit`, …) (sub-agents.md).
+- Хук `UserPromptSubmit` получает JSON с полем `prompt`; stdout при коде 0 добавляется в контекст.
+  `$CLAUDE_PROJECT_DIR` доступен. На Windows хуки выполняет Git Bash, если он установлен (hooks.md).
+- Пользовательские команды объединены со skills, skill вызывается как `/имя` (skills.md).
+
+**Codex CLI** ([документация](https://learn.chatgpt.com/docs/), бывший developers.openai.com/codex):
+
+- `AGENTS.md` читается по пути от корня git до рабочего каталога; общий лимит — 32 КиБ.
+- Skills ищутся в `.agents/skills` во всех каталогах от рабочего до корня репозитория. Ссылки
+  поддерживаются, явный вызов — `$имя`.
+- Проектный `.codex/config.toml` читается только для доверенных проектов. MCP задаётся в `[mcp_servers.<name>]`,
+  память выключена по умолчанию (`[features] memories`).
+- Хуки: `.codex/hooks.json`, формат как у Claude, есть поле `commandWindows`. Новый хук нужно одобрить
+  в `/hooks`.
+- Субагенты: `.codex/agents/<name>.toml` с полями `name`, `description`, `developer_instructions`
+  и любыми ключами config (`model_reasoning_effort`, `sandbox_mode`).
+- На Windows Codex работает нативно, команды выполняются в PowerShell.
+- Пользовательские промпты устарели, вместо них — skills.

@@ -1,0 +1,28 @@
+#!/bin/sh
+# Git pre-commit hook of an Agentic Project (enabled by `Toolbox/tb setup` through
+# core.hooksPath=.agents/git-hooks).
+#   - staged changes under Knowledge/  -> Toolbox/tb kb lint --quiet
+#   - always                           -> Toolbox/tb secrets scan --staged
+# Any failure aborts the commit.
+
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+# The project root is known here; do not let an inherited override point tb elsewhere.
+unset TB_ROOT
+
+tb=Toolbox/tb
+if [ ! -f "$tb" ]; then
+  echo "pre-commit: $tb not found in $root" >&2
+  exit 1
+fi
+
+status=0
+if ! git diff --cached --quiet -- Knowledge/; then
+  sh "$tb" kb lint --quiet || status=1
+fi
+sh "$tb" secrets scan --staged || status=1
+
+if [ "$status" -ne 0 ]; then
+  echo "pre-commit: commit aborted; fix the problems above and commit again" >&2
+fi
+exit "$status"

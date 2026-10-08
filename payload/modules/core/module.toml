@@ -1,0 +1,8 @@
+name = "core"
+description = "Agent entry point (AGENTS.md), the .agents/ system folder, Toolbox with tb, git settings"
+required = true
+default = true
+seeded = ["README.md", "Toolbox/README.md", ".agents/hooks/hooks.toml", ".agents/mcp.toml"]
+block = ["AGENTS.md", ".gitignore"]
+executable = ["Toolbox/tb", ".agents/git-hooks/pre-commit"]
+post_install = []

@@ -1,0 +1,24 @@
+# Каталог Ресурсов проекта. Хранится в git; читается командами `Toolbox/tb resources …`.
+# Каждый ресурс — отдельный блок [[resource]]. Склонированные ресурсы лежат в Resources/<name>/
+# и в корневой git не попадают; у каждого человека может быть склонирован любой поднабор каталога.
+#
+# Поля:
+#   name        — имя каталога в Resources/: латиница, kebab-case
+#   kind        — "git" (репозиторий) или "folder" (обычная папка без git)
+#   url         — адрес репозитория для git clone; для folder — откуда взять содержимое, если есть
+#   branch      — основная ветка для клонирования (необязательно)
+#   description — одна строка: что это за ресурс
+#   entity      — карточка ресурса в Знаниях, например "Knowledge/Entities/api.md"
+#
+# Добавлять ресурс удобнее командой:
+#   Toolbox/tb resources add git@github.com:org/api.git --name api --branch main --description "Бэкенд API" --clone
+#
+# Пример:
+#
+# [[resource]]
+# name = "api"
+# kind = "git"
+# url = "git@github.com:org/api.git"
+# branch = "main"
+# description = "Бэкенд API"
+# entity = "Knowledge/Entities/api.md"

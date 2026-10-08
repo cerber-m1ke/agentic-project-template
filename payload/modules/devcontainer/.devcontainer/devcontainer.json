@@ -1,0 +1,12 @@
+{
+  "name": "{{agentic.project_name}}",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "dev",
+  "mounts": [
+    "source=agentic-claude-${devcontainerId},target=/home/dev/.claude,type=volume",
+    "source=agentic-codex-${devcontainerId},target=/home/dev/.codex,type=volume"
+  ],
+  "postCreateCommand": "sh Toolbox/tb setup --agents claude,codex"
+}

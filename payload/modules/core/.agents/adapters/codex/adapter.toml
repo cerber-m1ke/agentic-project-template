@@ -1,0 +1,41 @@
+# Adapter manifest: how Codex CLI sees the canonical sources in .agents/.
+# Applied per machine by `Toolbox/tb agents link codex`; checked by `Toolbox/tb agents doctor`.
+# Renderer: Toolbox/agentic/adapters/codex.py. Managed by the template — do not edit by hand.
+# Codex reads the project .codex/ only when the project is trusted.
+
+name = "codex"
+title = "Codex CLI"
+tier = 3                       # 0 AGENTS.md only, 1 + native skills, 2 + subagents, 3 + hooks
+instructions = "native"        # reads AGENTS.md itself
+outputs = ["/.codex/"]         # generated paths; must be in the project .gitignore block
+link_hint = "Codex reads .codex/ only in trusted projects; approve new hooks once in /hooks."
+
+[skills]
+mode = "native"                # Codex scans <repo>/.agents/skills itself: no links
+target = ".agents/skills"
+granularity = "none"
+
+[subagents]
+target = ".codex/agents"       # <name>.toml: name, description, developer_instructions
+# No model names (they change often): the tier sets the reasoning effort only.
+reasoning_effort = { fast = "low", balanced = "medium", strong = "high" }
+# Codex has no tools list: the tools tier maps to a sandbox mode.
+sandbox = { read-only = "read-only", shell = "workspace-write", edit = "workspace-write" }
+
+[hooks]
+target = ".codex/hooks.json"
+# {name} = hook name; {tb} = absolute path of Toolbox/tb, {tb_cmd} = Toolbox\tb.cmd
+# (relative and unquoted: valid in both cmd and PowerShell when cwd is the project root). Codex runs hooks from the session cwd and has no
+# project-dir variable, so the path is absolute: after moving the project folder, rerun
+# `Toolbox/tb agents link`. New hooks must be approved once by the user in /hooks.
+command = "{tb} hook {name} --agent codex"
+command_windows = "{tb_cmd} hook {name} --agent codex"
+timeout = 30
+events = { session-start = "SessionStart", prompt-submit = "UserPromptSubmit", before-tool = "PreToolUse", after-tool = "PostToolUse", stop = "Stop" }
+
+[memory]
+target = ".codex/config.toml"
+disable = true                 # [features] memories = false
+
+[mcp]
+target = ".codex/config.toml"  # [mcp_servers.<name>]

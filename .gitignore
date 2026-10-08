@@ -8,3 +8,10 @@
 .DS_Store
 ._*
 Thumbs.db
+
+# Среда выполнения Toolbox (uv, Python, кэши): создаётся init.sh / init.cmd и тестами
+/Runtime/
+__pycache__/
+
+# local alias for older Claude Code versions, not part of the template
+/CLAUDE.md

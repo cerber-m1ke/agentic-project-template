@@ -1,0 +1,24 @@
+# Project Resources catalog. Stored in git; read by the `Toolbox/tb resources …` commands.
+# Each resource is a separate [[resource]] block. Cloned resources live in Resources/<name>/
+# and are not committed to the root git repository; each person may have any subset of the catalog cloned.
+#
+# Fields:
+#   name        — directory name in Resources/: ASCII, kebab-case
+#   kind        — "git" (repository) or "folder" (plain folder without git)
+#   url         — repository address for git clone; for folder — where to get the content, if anywhere
+#   branch      — main branch to clone (optional)
+#   description — one line: what this resource is
+#   entity      — the resource's card in Knowledge, e.g. "Knowledge/Entities/api.md"
+#
+# Adding a resource is easier with the command:
+#   Toolbox/tb resources add git@github.com:org/api.git --name api --branch main --description "Backend API" --clone
+#
+# Example:
+#
+# [[resource]]
+# name = "api"
+# kind = "git"
+# url = "git@github.com:org/api.git"
+# branch = "main"
+# description = "Backend API"
+# entity = "Knowledge/Entities/api.md"

@@ -1,0 +1,8 @@
+name = "knowledge"
+description = "Knowledge/ vault with note templates, tb kb, the librarian subagent and knowledge skills"
+required = true
+default = true
+seeded = []
+block = []
+executable = []
+post_install = []

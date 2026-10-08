@@ -1,0 +1,4 @@
+- `Resources/<name>/` are separate git repositories. Commit inside them (`git -C Resources/<name> …`), never to the root repository.
+- Before working in a resource, read its `AGENTS.md`/`CLAUDE.md`: inside a resource, its own rules apply.
+- In the task (`Knowledge/Tasks/`), record the affected resources (`resources`) and working branches.
+- Tests, linters, style and branches follow the resource's own conventions; run its checks before committing to the resource.

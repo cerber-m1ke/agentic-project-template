@@ -1,0 +1,44 @@
+# Adapter manifest: how Claude Code sees the canonical sources in .agents/.
+# Applied per machine by `Toolbox/tb agents link claude`; checked by `Toolbox/tb agents doctor`.
+# Renderer: Toolbox/agentic/adapters/claude.py. Managed by the template — do not edit by hand.
+
+name = "claude"
+title = "Claude Code"
+tier = 3                       # 0 AGENTS.md only, 1 + native skills, 2 + subagents, 3 + hooks
+instructions = "native"        # reads AGENTS.md itself while there is no CLAUDE.md
+outputs = ["/.claude/", "/.mcp.json"]   # generated paths; must be in the project .gitignore block
+
+[skills]
+mode = "link"                  # native | link | none
+target = ".claude/skills"
+granularity = "per-skill"      # .claude/skills/<name> -> .agents/skills/<name> (symlink or junction)
+
+[subagents]
+target = ".claude/agents"      # <name>.md with frontmatter name, description, tools, model
+models = { fast = "haiku", balanced = "sonnet", strong = "opus" }
+tools = { read-only = "Read, Grep, Glob", shell = "Read, Grep, Glob, Bash", edit = "Read, Grep, Glob, Bash, Edit, Write" }
+
+[hooks]
+target = ".claude/settings.json"
+# {name} = hook name. Hooks run in sh (Git Bash on Windows); stdin JSON has `prompt`,
+# stdout of a successful hook is added to the context.
+command = '"$CLAUDE_PROJECT_DIR"/Toolbox/tb hook {name} --agent claude'
+events = { session-start = "SessionStart", prompt-submit = "UserPromptSubmit", before-tool = "PreToolUse", after-tool = "PostToolUse", stop = "Stop" }
+
+[permissions]
+target = ".claude/settings.json"
+# Read-only tb commands that need no confirmation.
+allow = [
+    "Bash(Toolbox/tb kb *)",
+    "Bash(Toolbox/tb version)",
+    "Bash(Toolbox/tb resources status)",
+    "Bash(Toolbox/tb agents doctor)",
+    "Bash(Toolbox/tb secrets scan *)",
+]
+
+[memory]
+target = ".claude/settings.json"
+disable = true                 # autoMemoryEnabled = false + CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+
+[mcp]
+target = ".mcp.json"           # written only when .agents/mcp.toml defines servers

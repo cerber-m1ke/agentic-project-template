@@ -1,0 +1,8 @@
+name = "resources"
+description = "Resources/ catalog (resources.toml) and its rules; managed with tb resources"
+required = true
+default = true
+seeded = ["Resources/resources.toml"]
+block = []
+executable = []
+post_install = []

@@ -1,0 +1,4 @@
+name = "software"
+description = "Code projects: resources are git repositories"
+modules = ["core", "knowledge", "resources", "obsidian"]
+optional = ["devcontainer"]

@@ -1,0 +1,4 @@
+- `Resources/<name>/` are usually plain folders (documents, data): in `Resources/resources.toml` they have `kind = "folder"`. Commit a repository resource (`kind = "git"`) inside it: `git -C Resources/<name> …`.
+- Do not put large or binary data in the root git: it belongs in `Resources/`.
+- Describe data sources in Entities: where the data comes from, who owns it, its format, how to refresh it.
+- In the task (`Knowledge/Tasks/`), record the affected resources (`resources`).

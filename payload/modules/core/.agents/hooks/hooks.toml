@@ -1,0 +1,24 @@
+# Agent hooks in a canonical, agent-neutral form. `Toolbox/tb agents link` translates them
+# for every agent linked on this machine (Claude Code: .claude/settings.json,
+# Codex: .codex/hooks.json). Run it again after editing this file.
+#
+# Schema:
+#   [[hook]]
+#   name = "kb-suggest"        # handler name: the agent runs `Toolbox/tb hook <name> --agent <agent>`
+#   event = "prompt-submit"    # see the events below
+#   description = "…"          # what the hook does (for humans)
+#
+# Events:
+#   session-start   a session starts or resumes
+#   prompt-submit   the user sends a prompt (stdout of the handler is added to the context)
+#   before-tool     before a tool call
+#   after-tool      after a tool call
+#   stop            the agent finishes a response (fires after EVERY response)
+#
+# An event the agent does not support is skipped with a warning. Codex asks the user
+# to approve new hooks once in /hooks.
+
+[[hook]]
+name = "kb-suggest"
+event = "prompt-submit"
+description = "Add titles and paths of Knowledge notes matching the prompt to the context."

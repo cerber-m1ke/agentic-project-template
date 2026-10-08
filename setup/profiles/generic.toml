@@ -1,0 +1,4 @@
+name = "generic"
+description = "Projects without code (documentation, research, data): resources are usually plain folders"
+modules = ["core", "knowledge", "resources", "obsidian"]
+optional = ["devcontainer"]

@@ -1,0 +1,268 @@
+#!/bin/sh
+# Toolbox/tb - entry point of the project toolbox (POSIX sh; also used by Git Bash on Windows).
+#
+#   Toolbox/tb <command> [args...]        run Toolbox/agentic/cli.py (try: Toolbox/tb --help)
+#   Toolbox/tb run <script> [args...]     run a script with uv (PEP 723 inline metadata)
+#
+# Bootstrap: use `uv` from PATH if it is at least TB_UV_MIN; else Runtime/tools/uv/uv; else
+# download the pinned uv release (TB_UV_VERSION), verify its sha256 against the values embedded
+# below and unpack it into Runtime/tools/uv/. Python and caches go to Runtime/ as well, so nothing
+# is installed globally. Delete Runtime/ to reset; the next call rebuilds it.
+#
+# Environment:
+#   TB_ROOT                   project root override (default: the parent of Toolbox/)
+#   AGENTIC_UV_DOWNLOAD_URL   base URL of uv releases (default: GitHub); the asset is fetched
+#                             from <base>/<version>/<asset>
+#   HTTPS_PROXY               used by curl/wget and by uv
+#   UV_*                      variables that are already set are respected
+#
+# Exported to tools: AGENTIC_ROOT (absolute project root), PYTHONUTF8=1.
+# Keep the behaviour in sync with Toolbox/tb.cmd.
+
+unset CDPATH
+set -u
+
+TB_UV_VERSION=0.12.23
+# Oldest uv taken from PATH: 0.11.8 is the first release with UV_NO_PROJECT, which tb.cmd needs.
+TB_UV_MIN=0.11.8
+
+# sha256 of the release assets of uv $TB_UV_VERSION (from the <asset>.sha256 files of the release).
+uv_asset_sha256() {
+  case $1 in
+    uv-aarch64-apple-darwin.tar.gz)      echo 50487ae565ccd96e499056b4674d438f4c53170202617b4c759defe0c6a1b544 ;;
+    uv-x86_64-apple-darwin.tar.gz)       echo 960da44cb4b73685206ddd250b19e0a117fa41095710c1038f081f5cb613efb4 ;;
+    uv-aarch64-unknown-linux-musl.tar.gz) echo b536543cc4d50661986b165c76ee8aa9056e4fa332edcd153ff2e98760f9359b ;;
+    uv-x86_64-unknown-linux-musl.tar.gz) echo 1cff8783850e794470aadb73f54b749542a511fc57b0ce6468b64bd3852e0ade ;;
+    uv-aarch64-pc-windows-msvc.zip)      echo 13294e232ececbe709c06b74e6ced06f2a225ea5591476685362f22be56a50d5 ;;
+    uv-x86_64-pc-windows-msvc.zip)       echo 75d05de6762778c31ee183398de7dd15093fad0ed90b1f236d8205ea5ec00c90 ;;
+    *) return 1 ;;
+  esac
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+note() {
+  printf 'tb: %s\n' "$*" >&2
+}
+
+# version_ge A B: success when the dotted version A >= B (major.minor.patch, numeric).
+version_ge() {
+  _va=${1%%[!0-9.]*}
+  _vb=${2%%[!0-9.]*}
+  for _vi in 1 2 3; do
+    _xa=${_va%%.*}
+    _xb=${_vb%%.*}
+    [ -n "$_xa" ] || _xa=0
+    [ -n "$_xb" ] || _xb=0
+    [ "$_xa" -gt "$_xb" ] && return 0
+    [ "$_xa" -lt "$_xb" ] && return 1
+    case $_va in *.*) _va=${_va#*.} ;; *) _va= ;; esac
+    case $_vb in *.*) _vb=${_vb#*.} ;; *) _vb= ;; esac
+  done
+  return 0
+}
+
+# uv_usable PATH: success when PATH runs and reports a version >= TB_UV_MIN.
+uv_usable() {
+  _out=$("$1" --version 2>/dev/null </dev/null) || return 1
+  _out=${_out#uv }                      # "uv 0.12.23 (46b84fd0b 2026-10-03 ...)"
+  version_ge "${_out%% *}" "$TB_UV_MIN"
+}
+
+# download URL FILE
+download() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 --connect-timeout 30 -o "$2" "$1" </dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    # wget reads only the lower-case proxy variable.
+    if [ -z "${https_proxy-}" ] && [ -n "${HTTPS_PROXY-}" ]; then
+      https_proxy=$HTTPS_PROXY
+      export https_proxy
+    fi
+    wget -q -O "$2" "$1" </dev/null
+  else
+    die "neither curl nor wget is available; install one of them or put uv >= $TB_UV_MIN on PATH"
+  fi
+}
+
+# sha256_of FILE: print the lower-case hex digest (read from stdin, so the file name never matters).
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    _sum=$(sha256sum <"$1") || return 1
+  elif command -v shasum >/dev/null 2>&1; then
+    _sum=$(shasum -a 256 <"$1") || return 1
+  elif command -v openssl >/dev/null 2>&1; then
+    _sum=$(openssl dgst -sha256 -r <"$1") || return 1
+  else
+    return 1
+  fi
+  printf '%s\n' "${_sum%% *}"
+}
+
+# unpack_zip ZIP DIR (Windows only). Git for Windows ships unzip; Windows 10+ ships bsdtar as
+# System32\tar.exe, which reads zip files; PowerShell is the last resort.
+unpack_zip() {
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -q -o "$1" -d "$2" </dev/null
+    return
+  fi
+  _sysroot=${SYSTEMROOT:-${SystemRoot:-C:\\Windows}}
+  if command -v cygpath >/dev/null 2>&1; then
+    _sysroot=$(cygpath -u "$_sysroot")
+  fi
+  if [ -x "$_sysroot/System32/tar.exe" ]; then
+    "$_sysroot/System32/tar.exe" -xf "$1" -C "$2" </dev/null
+    return
+  fi
+  _zip=$(printf '%s' "$1" | sed "s/'/''/g")
+  _dst=$(printf '%s' "$2" | sed "s/'/''/g")
+  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \
+    "\$ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath '$_zip' -DestinationPath '$_dst' -Force" </dev/null
+}
+
+# install_uv: download, verify and unpack the pinned uv into $uv_dir. Uses $tb_tmp (removed by
+# the EXIT trap set by the caller).
+#
+# Windows (Git Bash/MSYS2/Cygwin): the bootstrap runs here natively instead of delegating to
+# tb.cmd through `cmd.exe //c`, because passing quoted paths with spaces through MSYS argument
+# conversion and cmd's quote rules is fragile. curl and sha256sum are part of Git for Windows;
+# see unpack_zip for the zip extraction fallbacks.
+install_uv() {
+  _arch=$(uname -m 2>/dev/null) || _arch=unknown
+  _asset=
+  case $tb_os in
+    Darwin)
+      # A shell running under Rosetta reports x86_64 on Apple silicon; take the native build.
+      if [ "$_arch" = x86_64 ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+        _arch=arm64
+      fi
+      case $_arch in
+        arm64 | aarch64) _asset=uv-aarch64-apple-darwin.tar.gz ;;
+        x86_64) _asset=uv-x86_64-apple-darwin.tar.gz ;;
+      esac
+      ;;
+    Linux)
+      case $_arch in
+        aarch64 | arm64) _asset=uv-aarch64-unknown-linux-musl.tar.gz ;;
+        x86_64 | amd64) _asset=uv-x86_64-unknown-linux-musl.tar.gz ;;
+      esac
+      ;;
+    MINGW* | MSYS* | CYGWIN*)
+      case $_arch in
+        aarch64 | arm64) _asset=uv-aarch64-pc-windows-msvc.zip ;;
+        x86_64 | amd64) _asset=uv-x86_64-pc-windows-msvc.zip ;;
+      esac
+      ;;
+  esac
+  [ -n "$_asset" ] || die "no pinned uv build for $tb_os/$_arch; install uv >= $TB_UV_MIN and put it on PATH"
+  _expected=$(uv_asset_sha256 "$_asset")
+
+  _base=${AGENTIC_UV_DOWNLOAD_URL:-https://github.com/astral-sh/uv/releases/download}
+  _url=${_base%/}/$TB_UV_VERSION/$_asset
+
+  mkdir -p "$uv_dir" || die "cannot create $uv_dir"
+  tb_tmp=$uv_dir/.download.$$
+  rm -rf "$tb_tmp"
+  mkdir "$tb_tmp" || die "cannot create $tb_tmp"
+
+  note "downloading uv $TB_UV_VERSION ($_asset) into Runtime/tools/uv ..."
+  download "$_url" "$tb_tmp/$_asset" ||
+    die "failed to download $_url (check the network connection or HTTPS_PROXY; set AGENTIC_UV_DOWNLOAD_URL to use a mirror)"
+
+  _actual=$(sha256_of "$tb_tmp/$_asset") ||
+    die "cannot compute the sha256 of $_asset (needs sha256sum, shasum or openssl); put uv >= $TB_UV_MIN on PATH instead"
+  if [ "$_actual" != "$_expected" ]; then
+    rm -f "$tb_tmp/$_asset"
+    die "checksum mismatch for $_asset (expected $_expected, got $_actual); the downloaded file was deleted"
+  fi
+
+  case $_asset in
+    *.zip)
+      unpack_zip "$tb_tmp/$_asset" "$tb_tmp" || die "failed to unpack $_asset"
+      _src=$tb_tmp
+      ;;
+    *)
+      tar -xzf "$tb_tmp/$_asset" -C "$tb_tmp" </dev/null || die "failed to unpack $_asset"
+      _src=$tb_tmp/${_asset%.tar.gz}
+      ;;
+  esac
+  chmod +x "$_src/uv$exe" "$_src/uvx$exe" 2>/dev/null
+  "$_src/uv$exe" --version >/dev/null 2>&1 </dev/null ||
+    die "the downloaded uv does not run on this system; install uv >= $TB_UV_MIN and put it on PATH"
+  # uvx first: an existing Runtime/tools/uv/uv means the installation is complete.
+  for _bin in uvx uv; do
+    # A failed move is fine when a parallel tb call has just installed the same file.
+    mv -f "$_src/$_bin$exe" "$uv_dir/$_bin$exe" 2>/dev/null || [ -x "$uv_dir/$_bin$exe" ] ||
+      die "cannot move $_bin$exe into $uv_dir"
+  done
+  rm -rf "$tb_tmp"
+  tb_tmp=
+  note "uv $TB_UV_VERSION installed"
+}
+
+# --- Platform ------------------------------------------------------------------------------------
+tb_os=$(uname -s 2>/dev/null) || tb_os=unknown
+case $tb_os in
+  MINGW* | MSYS* | CYGWIN*) tb_windows=1 exe=.exe ;;
+  *) tb_windows= exe= ;;
+esac
+
+# --- Paths ---------------------------------------------------------------------------------------
+case $0 in
+  */*) tb_dir=${0%/*} ;;
+  *\\*) tb_dir=${0%\\*} ;;              # C:\...\Toolbox\tb started from Git Bash
+  *) tb_dir=. ;;
+esac
+tb_dir=$(cd -P -- "${tb_dir:-/}" 2>/dev/null && pwd -P) || die "cannot resolve the Toolbox directory from $0"
+if [ -n "${TB_ROOT-}" ]; then
+  ROOT=$(cd -P -- "$TB_ROOT" 2>/dev/null && pwd -P) || die "TB_ROOT is not a directory: $TB_ROOT"
+else
+  ROOT=${tb_dir%/*}
+  [ -n "$ROOT" ] || ROOT=/
+fi
+if [ -n "$tb_windows" ] && command -v cygpath >/dev/null 2>&1; then
+  # Native Windows programs (uv, Python) need C:/... paths; MSYS tools accept them too.
+  ROOT=$(cygpath -m "$ROOT")
+  tb_dir=$(cygpath -m "$tb_dir")
+fi
+
+# --- Environment ---------------------------------------------------------------------------------
+AGENTIC_ROOT=$ROOT
+PYTHONUTF8=1
+: "${UV_PYTHON_INSTALL_DIR:=$ROOT/Runtime/tools/python}"
+: "${UV_PYTHON_BIN_DIR:=$ROOT/Runtime/tools/python-bin}"
+: "${UV_CACHE_DIR:=$ROOT/Runtime/cache/uv}"
+: "${UV_PYTHON_PREFERENCE:=only-managed}"
+export AGENTIC_ROOT PYTHONUTF8 UV_PYTHON_INSTALL_DIR UV_PYTHON_BIN_DIR UV_CACHE_DIR UV_PYTHON_PREFERENCE
+
+# --- uv ------------------------------------------------------------------------------------------
+uv_dir=$ROOT/Runtime/tools/uv
+if tb_uv=$(command -v uv 2>/dev/null) && uv_usable "$tb_uv"; then
+  :
+elif [ -x "$uv_dir/uv$exe" ]; then
+  tb_uv=$uv_dir/uv$exe
+else
+  tb_tmp=
+  trap 'if [ -n "$tb_tmp" ]; then rm -rf "$tb_tmp"; fi' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  install_uv
+  trap - EXIT INT TERM HUP
+  tb_uv=$uv_dir/uv$exe
+fi
+
+if [ "$UV_PYTHON_PREFERENCE" = only-managed ] && [ ! -d "$UV_PYTHON_INSTALL_DIR" ]; then
+  note "first run: uv is preparing Python in Runtime/ (this can take a minute) ..."
+fi
+
+# --- Dispatch ------------------------------------------------------------------------------------
+if [ "${1-}" = run ]; then
+  shift
+  [ $# -gt 0 ] || die "usage: tb run <script> [args...]"
+  exec "$tb_uv" run --no-project --quiet "$@"
+fi
+exec "$tb_uv" run --no-project --quiet "$tb_dir/agentic/cli.py" "$@"
