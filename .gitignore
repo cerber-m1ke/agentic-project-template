@@ -1,0 +1,10 @@
+# Средство просмотра Obsidian
+.obsidian/
+.trash/
+
+# Редакторы и система
+.idea/
+.vscode/
+.DS_Store
+._*
+Thumbs.db
