@@ -14,7 +14,8 @@ from pathlib import Path
 import common
 
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
-VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+# setup/VERSION: a release X.Y.Z or a development state X.Y.Z-dev, which precedes release X.Y.Z.
+VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(-dev)?$")
 UPDATE_DIR = "Runtime/update"
 
 
@@ -34,13 +35,17 @@ def _usage(parser: argparse.ArgumentParser) -> int:
     return 2
 
 
-def _version(text: str) -> tuple[int, int, int] | None:
+def _version(text: str) -> tuple[int, int, int, int] | None:
+    """(major, minor, patch, release): X.Y.Z-dev -> (X, Y, Z, 0), release X.Y.Z -> (X, Y, Z, 1)."""
     m = VERSION_RE.match(text.strip())
-    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), 0 if m.group(4) else 1) if m else None
 
 
 def _git(*args: str, cwd: Path | None = None):
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")  # never hang on a credential prompt
+    # Never hang on a prompt: no credential prompts, and ssh in batch mode (unknown host keys fail
+    # instead of asking). A GIT_SSH_COMMAND of the user is kept.
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
     return common.run(["git", *args], cwd=cwd or common.project_root(), env=env)
 
 
@@ -56,7 +61,7 @@ def release_tags(source: str) -> tuple[dict[tuple[int, int, int], str] | None, s
         tag = parts[1][len("refs/tags/"):]
         m = TAG_RE.match(tag)
         if m:
-            tags[(int(m.group(1)), int(m.group(2)), int(m.group(3)))] = tag
+            tags[(int(m.group(1)), int(m.group(2)), int(m.group(3)), 1)] = tag
     return tags, ""
 
 
@@ -98,7 +103,7 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         common.warn(f"using --source {args.source}; {common.LOCK_PATH} records "
                     f"{locked_source or '(none)'}")
     current = tpl.get("version", "0.0.0")
-    current_v = _version(current) or (0, 0, 0)
+    current_v = _version(current) or (0, 0, 0, 0)
 
     if args.ref:
         ref = args.ref
@@ -130,7 +135,7 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     tag_match = TAG_RE.match(ref)
     if tag_match and ref[1:] != version:
         common.warn(f"tag {ref} contains setup/VERSION {version}")
-    if (_version(version) or (0, 0, 0)) <= current_v:
+    if (_version(version) or (0, 0, 0, 0)) <= current_v:
         common.warn(f"fetched v{version} is not newer than the installed v{current}")
     where = common.rel(dest)
     common.out(f"Fetched template v{version} ({ref}, {head[:12]}) into {where}/")

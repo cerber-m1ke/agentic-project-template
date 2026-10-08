@@ -169,9 +169,19 @@ def knowledge_dir() -> Path:
     return common.project_root() / common.KNOWLEDGE_DIR
 
 
+def is_note_parts(parts: tuple[str, ...]) -> bool:
+    """Whether a file (parts relative to Knowledge/) is a note: *.md except READMEs, templates,
+    hidden folders and task artifacts inside Tasks/<slug>/."""
+    name = parts[-1]
+    if not name.endswith(".md") or name == "README.md":
+        return False
+    if any(part.startswith(".") for part in parts[:-1]) or (len(parts) > 1 and parts[0] == TEMPLATES_DIR):
+        return False
+    return not (parts[0] == "Tasks" and len(parts) >= 3 and not (len(parts) == 3 and name == "index.md"))
+
+
 def note_files(kdir: Path) -> list[tuple[Path, tuple[str, ...]]]:
-    """Note files (path, parts relative to Knowledge/): *.md except READMEs, templates, hidden dirs
-    and task artifacts."""
+    """Note files (path, parts relative to Knowledge/), see is_note_parts."""
     result: list[tuple[Path, tuple[str, ...]]] = []
     for dirpath, dirnames, filenames in os.walk(kdir):
         d = Path(dirpath)
@@ -180,12 +190,9 @@ def note_files(kdir: Path) -> list[tuple[Path, tuple[str, ...]]]:
         dirnames[:] = sorted(n for n in dirnames if not n.startswith(".")
                              and not (not relparts and n == TEMPLATES_DIR))
         for name in sorted(filenames):
-            if not name.endswith(".md") or name == "README.md":
-                continue
             parts = relparts + (name,)
-            if parts[0] == "Tasks" and len(parts) >= 3 and not (len(parts) == 3 and name == "index.md"):
-                continue  # task artifacts inside Tasks/<slug>/
-            result.append((d / name, parts))
+            if is_note_parts(parts):
+                result.append((d / name, parts))
     return result
 
 
@@ -208,10 +215,13 @@ def split_frontmatter(text: str) -> tuple[dict | None, str, str | None, bool]:
     return meta, body, None, True
 
 
-def parse_note(path: Path, kdir: Path, parts: tuple[str, ...] | None = None) -> Note:
+def parse_note(path: Path, kdir: Path, parts: tuple[str, ...] | None = None,
+               data: bytes | None = None) -> Note:
+    """Parse a note from disk, or from `data` (e.g. its staged content)."""
     parts = parts or path.relative_to(kdir).parts
     try:
-        text = common.normalize_newlines(common.read_text(path)).removeprefix("\ufeff")
+        raw = common.read_text(path) if data is None else data.decode("utf-8")
+        text = common.normalize_newlines(raw).removeprefix("\ufeff")
     except (OSError, UnicodeDecodeError) as exc:
         text, meta, body, err, has_fm = "", None, "", f"cannot read file: {exc}", False
     else:
@@ -231,6 +241,40 @@ def load_notes(warn_missing: bool = True) -> list[Note]:
 
 
 # --- links -------------------------------------------------------------------------------
+
+class IndexSnapshot:
+    """File existence as of the git index (what the next commit contains), for `lint --staged`.
+    Paths outside the project or under Resources/ (not in the root repository) use the disk."""
+
+    def __init__(self, root: Path, paths: set[str]) -> None:
+        self.root = root
+        self.files = paths
+        self.dirs = {"/".join(p.split("/")[:i]) for p in paths for i in range(1, p.count("/") + 1)}
+
+    def _rel(self, path: Path) -> str | None:
+        rel = os.path.relpath(os.path.normpath(path), self.root).replace(os.sep, "/")
+        if rel == "." or rel.startswith("../") or rel == ".." or rel.split("/")[0] == "Resources":
+            return None
+        return rel
+
+    def exists(self, path: Path) -> bool:
+        rel = self._rel(path)
+        return path.exists() if rel is None else (rel in self.files or rel in self.dirs)
+
+    def is_dir(self, path: Path) -> bool:
+        rel = self._rel(path)
+        return path.is_dir() if rel is None else rel in self.dirs
+
+
+_snapshot: IndexSnapshot | None = None  # set by `lint --staged`
+
+
+def _exists(path: Path) -> bool:
+    return path.exists() if _snapshot is None else _snapshot.exists(path)
+
+
+def _is_dir(path: Path) -> bool:
+    return path.is_dir() if _snapshot is None else _snapshot.is_dir(path)
 
 def strip_code(body: str) -> list[str]:
     """Body lines with fenced code blocks and inline code blanked out (line count preserved)."""
@@ -264,7 +308,7 @@ def resolve_target(target: str, base_dir: Path) -> Path | None:
     else:
         p = base_dir / target
     p = Path(os.path.normpath(p))
-    if p.is_dir() and (p / "index.md").is_file():
+    if _is_dir(p) and _exists(p / "index.md"):
         p = p / "index.md"
     return p
 
@@ -278,7 +322,7 @@ def extract_links(lines: list[str], path: Path, offset: int = 0) -> list[Link]:
             resolved = resolve_target(m.group(3), path.parent)
             if resolved is not None:
                 links.append(Link(line=offset + i, target=m.group(3), path=resolved,
-                                  exists=resolved.exists(), image=bool(m.group(1))))
+                                  exists=_exists(resolved), image=bool(m.group(1))))
     return links
 
 
@@ -605,6 +649,11 @@ def cmd_new(args: argparse.Namespace) -> int:
             return common.fail(f"already exists: {common.rel(existing)}")
     title = args.title.strip() if args.title and args.title.strip() else slug.replace("-", " ").capitalize()
     text = render_template(common.read_text(template), title, common.today_iso())
+    if args.description and args.description.strip():
+        line = 'description: "' + _yaml_dq(" ".join(args.description.split())) + '"'
+        text, n = re.subn(r"(?m)^description:.*$", lambda _m: line, text, count=1)
+        if not n:
+            return common.fail(f"template {common.rel(template)} has no `description:` line")
     if _FM_RE.match(text):
         try:
             _meta, _body, err = common.split_frontmatter(text)
@@ -618,6 +667,8 @@ def cmd_new(args: argparse.Namespace) -> int:
     if same:
         common.warn(f"slug '{slug}' is also used by {', '.join(same)}")
     common.out(common.rel(target))
+    if not (args.description and args.description.strip()):
+        common.warn("fill `description` (one line; search ranks by it): `tb kb lint` requires it")
     return 0
 
 
@@ -650,7 +701,10 @@ def cmd_index(args: argparse.Namespace) -> int:
         heading = common.KNOWLEDGE_TYPES[t]["folder"] if t in common.KNOWLEDGE_TYPES else "Other"
         common.out(f"\n## {heading} ({len(groups[t])})\n")
         for n in groups[t]:
-            target = f"<{n.rel}>" if " " in n.rel else n.rel
+            target = n.rel
+            if args.base is not None:
+                target = Path(os.path.relpath(n.path, common.project_root() / args.base)).as_posix()
+            target = f"<{target}>" if " " in target else target
             desc = f" — {n.description}" if n.description else ""
             common.out(f"- [{_md_link_text(n.title)}]({target}){desc} ({n.status})")
     return 0
@@ -689,16 +743,20 @@ def as_date(value: Any) -> date | None:
 
 
 def estimate_tokens(text: str) -> int:
+    """Rough upper estimate: ~4 ASCII characters per token, ~2.5 for Cyrillic and other scripts."""
     ascii_chars = sum(1 for c in text if ord(c) < 128)
-    return round(ascii_chars / 4 + (len(text) - ascii_chars) / 3)
+    return round(ascii_chars / 4 + (len(text) - ascii_chars) / 2.5)
 
 
-def load_resource_names(problems: list[Problem]) -> set[str] | None:
+def load_resource_names(problems: list[Problem], text: str | None = None) -> set[str] | None:
+    """Resource names of the catalog (from disk, or from `text`, e.g. its staged content)."""
+    import tomllib
+
     path = common.project_root() / "Resources" / "resources.toml"
-    if not path.is_file():
+    if text is None and not path.is_file():
         return None
     try:
-        data = common.load_toml(path)
+        data = common.load_toml(path) if text is None else tomllib.loads(text)
     except Exception as exc:
         problems.append(Problem(common.rel(path), None, "error", f"invalid TOML: {exc}"))
         return None
@@ -825,27 +883,56 @@ def _reference_exists(ref: str, note: Note, slugs: dict[str, list[Note]]) -> boo
     target = m.group(3) if m else ref
     if "/" in target or target.endswith(".md"):
         p = resolve_target(target, note.path.parent)
-        if p is not None and p.exists():
+        if p is not None and _exists(p):
             return True
         p = resolve_target(target, knowledge_dir())
-        return p is not None and p.exists()
+        return p is not None and _exists(p)
     return target in slugs
 
 
-def run_lint() -> tuple[list[Problem], int]:
+def staged_notes() -> tuple[list[Note], str | None]:
+    """Notes as the next commit has them (the git index), and the staged resources.toml text.
+    Sets the module's IndexSnapshot so links resolve against the index as well."""
+    global _snapshot
+    root, kdir = common.project_root(), knowledge_dir()
+    res = common.run(["git", "ls-files", "-z"], cwd=root)
+    if res.returncode != 0:
+        raise RuntimeError(res.stderr.strip() or "git ls-files failed")
+    paths = {p for p in res.stdout.split("\0") if p}
+    _snapshot = IndexSnapshot(root, paths)
+    prefix = common.KNOWLEDGE_DIR + "/"
+    wanted = sorted(p for p in paths if p.startswith(prefix) and is_note_parts(tuple(p[len(prefix):].split("/"))))
+    catalog = "Resources/resources.toml"
+    blobs = secret_scan._staged_blobs(root, wanted + ([catalog] if catalog in paths else []))
+    notes = [parse_note(root / p, kdir, tuple(p[len(prefix):].split("/")), data=blobs.get(p, b""))
+             for p in wanted]
+    text = blobs[catalog].decode("utf-8", errors="replace") if catalog in blobs else None
+    return notes, text
+
+
+def run_lint(staged: bool = False) -> tuple[list[Problem], int]:
+    """Lint the Knowledge base on disk, or (staged) exactly what the next commit contains:
+    untracked or unstaged drafts neither block a commit nor hide a broken staged note."""
     root = common.project_root()
     kdir = knowledge_dir()
     problems: list[Problem] = []
-    notes = load_notes(warn_missing=False)
-    if not kdir.is_dir():
-        problems.append(Problem(common.KNOWLEDGE_DIR + "/", None, "warning", "directory not found"))
-    resource_names = load_resource_names(problems)
+    if staged:
+        notes, catalog_text = staged_notes()
+        resource_names = load_resource_names(problems, catalog_text) if catalog_text is not None else None
+    else:
+        notes = load_notes(warn_missing=False)
+        if not kdir.is_dir():
+            problems.append(Problem(common.KNOWLEDGE_DIR + "/", None, "warning", "directory not found"))
+        resource_names = load_resource_names(problems)
     slugs: dict[str, list[Note]] = defaultdict(list)
     for n in notes:
         slugs[n.slug].append(n)
     today = date.today()
     for n in notes:
         problems.extend(lint_note(n, slugs, resource_names, today))
+    if staged:  # secrets of staged files: `tb secrets scan --staged` (pre-commit runs both)
+        problems.sort(key=lambda p: (p.path, p.line or 0))
+        return problems, len(notes)
     if kdir.is_dir():
         skip = secret_scan.SKIP_DIRS | {".obsidian", ".trash"}
         findings, _ = secret_scan.scan_files(secret_scan.iter_files([kdir], skip))
@@ -867,7 +954,12 @@ def _plural(n: int, word: str) -> str:
 
 
 def cmd_lint(args: argparse.Namespace) -> int:
-    problems, count = run_lint()
+    if args.staged and common.git("rev-parse", "--git-dir").returncode != 0:
+        return common.fail("--staged needs a git repository")
+    try:
+        problems, count = run_lint(staged=args.staged)
+    except RuntimeError as exc:
+        return common.fail(str(exc))
     for p in problems:
         common.out(p.format())
     errors = sum(1 for p in problems if p.level == "error")
@@ -952,15 +1044,21 @@ def register(sub) -> None:
     n.add_argument("type", help="|".join(common.KNOWLEDGE_TYPES))
     n.add_argument("slug", help="file name: lowercase kebab-case, without .md")
     n.add_argument("--title", help="note title (default: from the slug)")
+    n.add_argument("--description", help="one-line description (required by lint; search ranks by it)")
     n.add_argument("--folder", action="store_true", help="task only: create Tasks/<slug>/index.md")
     n.set_defaults(func=cmd_new)
 
     i = s.add_parser("index", help="print an index of all notes grouped by type")
     i.add_argument("--json", action="store_true", help="JSON output")
+    i.add_argument("--base", metavar="DIR",
+                   help="make links relative to DIR (e.g. Knowledge when saving the index there); "
+                        "default: the project root")
     i.set_defaults(func=cmd_index)
 
     li = s.add_parser("lint", help="validate notes (frontmatter, names, links, secrets, AGENTS.md size)")
     li.add_argument("--quiet", action="store_true", help="print only problems")
+    li.add_argument("--staged", action="store_true",
+                    help="lint the notes as staged in git (pre-commit): ignores unstaged and untracked edits")
     li.set_defaults(func=cmd_lint)
 
     st = s.add_parser("stale", help="notes due for review")

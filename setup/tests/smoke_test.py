@@ -4,7 +4,9 @@
 # [tool.uv]
 # exclude-newer = "2026-10-01T00:00:00Z"
 # ///
-"""End-to-end smoke test: release -> clone -> init -> tb commands -> next release -> update.
+"""End-to-end smoke test: release -> clone -> init -> tb commands -> next release -> update
+(conflicts, removal, seeded changes, a new module, a language switch) -> a project initialized from
+a development state receives the release.
 
     TB_ROOT=<template> payload/modules/core/Toolbox/tb run setup/tests/smoke_test.py [--keep]
 
@@ -148,8 +150,12 @@ def insert_after_marker(text: str, line: str) -> str:
 
 
 def bump_minor(version: str) -> str:
-    major, minor, _patch = il.parse_version(version)
+    major, minor, _patch, _release = il.parse_version(version)
     return f"{major}.{minor + 1}.0"
+
+
+def release_of(version: str) -> str:
+    return version.removesuffix("-dev")
 
 
 def read(path: Path) -> str:
@@ -160,7 +166,8 @@ def read(path: Path) -> str:
 
 def stage_release(origin: Path, env: dict) -> tuple[str, str]:
     copy_template(origin)
-    version = il.read_version(origin)
+    version = release_of(il.read_version(origin))  # the working tree is X.Y.Z-dev between releases
+    (origin / il.VERSION_FILE).write_text(version + "\n", encoding="utf-8")
     git("init", "--quiet", cwd=origin, env=env)
     git("symbolic-ref", "HEAD", "refs/heads/main", cwd=origin, env=env)
     git("add", "-A", cwd=origin, env=env)
@@ -205,6 +212,13 @@ def stage_refusals(origin: Path, work: Path, env: dict) -> None:
 
 def stage_init(origin: Path, project: Path, env: dict, version: str, commit: str) -> dict:
     git("clone", "--quiet", str(origin), str(project), cwd=origin.parent, env=env)
+    # Leftovers that the template's .gitignore hides must not end up in the initial commit, and a
+    # repository-local identity must survive the replacement of .git.
+    if not WINDOWS:
+        os.symlink("AGENTS.md", project / "CLAUDE.md")
+    (project / ".idea").mkdir()
+    (project / ".idea" / "workspace.xml").write_text("<project/>\n", encoding="utf-8")
+    git("config", "user.name", "Local Smoke", cwd=project, env=env)
     args = ["--name", NAME, "--profile", "software", "--language", "ru", "--agents", ",".join(AGENTS), "--yes"]
     if WINDOWS:
         cmd = ["cmd", "/c", str(project / "init.cmd"), *args]
@@ -247,6 +261,17 @@ def stage_init(origin: Path, project: Path, env: dict, version: str, commit: str
     R.check("git: exactly one commit", count == "1" and subject == f"agentic: init from template v{version}",
             f"{count} commit(s), last: {subject}")
     R.check("git: branch main", git("branch", "--show-current", cwd=project, env=env) == "main")
+    tracked = git("ls-files", cwd=project, env=env).splitlines()
+    R.check("init: commits payload files only (no template leftovers)",
+            "CLAUDE.md" not in tracked and not any(t.startswith(".idea/") for t in tracked)
+            and il.LOCK_PATH in tracked and set(lock_files_of(project)) <= set(tracked),
+            f"{[t for t in tracked if t in ('CLAUDE.md',) or t.startswith('.idea/')]}")
+    author = git("log", "-1", "--format=%an", cwd=project, env=env)
+    R.check("init: repository-local git identity kept", author == "Local Smoke", author)
+    claude_md = read(project / "CLAUDE.md")
+    R.check("claude: CLAUDE.md is generated and imports AGENTS.md",
+            "@AGENTS.md" in claude_md and not (project / "CLAUDE.md").is_symlink()
+            and "@AGENTS.md" not in read(project / "AGENTS.md"), claude_md[:200])
     R.check("git: clean tree after init and setup", git("status", "--porcelain", cwd=project, env=env) == "",
             git("status", "--porcelain", cwd=project, env=env)[:300])
     R.check("git: core.hooksPath", git("config", "core.hooksPath", cwd=project, env=env) == ".agents/git-hooks")
@@ -275,23 +300,26 @@ def stage_init(origin: Path, project: Path, env: dict, version: str, commit: str
     return lock
 
 
+def lock_files_of(project: Path) -> list[str]:
+    return list(tomllib.loads(read(project / il.LOCK_PATH) or "").get("files", {}))
+
+
 def il_is_link(path: Path) -> bool:
     return path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction())
 
 
 def stage_toolbox(project: Path, env: dict, work: Path) -> None:
     tb = tb_cmd(project)
-    res = run([*tb, "kb", "new", "gotcha", "uv-proxy", "--title", NOTE_TITLE], project, env)
+    description = "Без HTTPS_PROXY uv не может скачать Python и пакеты за корпоративным прокси"
+    res = run([*tb, "kb", "new", "gotcha", "uv-proxy", "--title", NOTE_TITLE, "--description", description],
+              project, env)
     note = project / NOTE_PATH
-    R.check("tb kb new gotcha", res.returncode == 0 and note.is_file(), tail(output(res)))
+    R.check("tb kb new gotcha --description", res.returncode == 0 and note.is_file()
+            and f'description: "{description}"' in read(note), tail(output(res)))
     if note.is_file():
-        text = read(note)
-        description = "Без HTTPS_PROXY uv не может скачать Python и пакеты за корпоративным прокси"
-        text, n = re.subn(r"(?m)^description:.*$", f'description: "{description}"', text, count=1)
-        text = text.rstrip("\n") + ("\n\nЗа корпоративным прокси загрузка uv и Python падает с таймаутом. "
-                                    "Решение: задать HTTPS_PROXY перед запуском Toolbox/tb.\n")
+        text = read(note).rstrip("\n") + ("\n\nЗа корпоративным прокси загрузка uv и Python падает с "
+                                          "таймаутом. Решение: задать HTTPS_PROXY перед запуском Toolbox/tb.\n")
         il.write_file(project, NOTE_PATH, text.encode("utf-8"), text=True)
-        R.check("kb note: description filled", n == 1)
     res = run([*tb, "kb", "lint"], project, env)
     R.check("tb kb lint", res.returncode == 0, tail(output(res)))
     res = run([*tb, "kb", "search", "прокси", "загрузки"], project, env)
@@ -299,6 +327,7 @@ def stage_toolbox(project: Path, env: dict, work: Path) -> None:
             tail(output(res)))
     res = run([*tb, "agents", "doctor"], project, env)
     R.check("tb agents doctor", res.returncode == 0, tail(output(res)))
+    stage_hook_and_root(project, env, work)
 
     # A resource: local bare repository with one commit.
     src, bare = work / "lib-src", work / "remotes" / "lib.git"
@@ -316,12 +345,66 @@ def stage_toolbox(project: Path, env: dict, work: Path) -> None:
             and (project / "Resources" / "lib" / "README.md").is_file(), tail(output(res)))
     res = run([*tb, "resources", "status"], project, env)
     R.check("tb resources status", res.returncode == 0 and "lib" in res.stdout, tail(output(res)))
+    draft = project / "Knowledge" / "Plans" / "draft.md"
+    draft.write_text("unfinished draft without frontmatter\n", encoding="utf-8")  # untracked: ignored
     paths = [p for p in (NOTE_PATH, "Resources/resources.toml") if (project / p).is_file()]
     res = run(["git", "add", "--", *paths], project, env)
     res = run(["git", "commit", "-m", "knowledge: add uv proxy gotcha"], project, env)  # runs pre-commit
-    R.check("git commit with pre-commit hook (kb lint, secrets scan)", res.returncode == 0, tail(output(res)))
+    R.check("git commit with pre-commit hook (kb lint --staged, secrets scan); untracked draft ignored",
+            res.returncode == 0, tail(output(res)))
+    stage_precommit_blocks(project, env, draft)
     R.require("git: clean tree before update", git("status", "--porcelain", cwd=project, env=env) == "",
               git("status", "--porcelain", cwd=project, env=env)[:300])
+
+
+def stage_hook_and_root(project: Path, env: dict, work: Path) -> None:
+    tb = tb_cmd(project)
+    prompt = json.dumps({"prompt": "как обойти прокси при загрузке uv"}, ensure_ascii=False)
+    res = subprocess.run([*tb, "hook", "kb-suggest", "--agent", "claude"], cwd=project, env=env,
+                         input=prompt, text=True, encoding="utf-8", capture_output=True, timeout=120)
+    R.check("tb hook kb-suggest suggests the note", res.returncode == 0 and NOTE_PATH in res.stdout,
+            tail(res.stdout + res.stderr))
+    # A runtime that is not ready (no Python, offline) must not block the prompt (exit code 2 would).
+    broken = dict(env, UV_PYTHON_INSTALL_DIR=str(work / "no-python"), UV_PYTHON_BIN_DIR=str(work / "no-python-bin"))
+    res = subprocess.run([*tb, "hook", "kb-suggest", "--agent", "claude"], cwd=project, env=broken,
+                         input=prompt, text=True, encoding="utf-8", capture_output=True, timeout=60)
+    R.check("tb hook exits 0 and downloads nothing when the runtime is not ready",
+            res.returncode == 0 and not (work / "no-python").exists(), f"rc={res.returncode} {tail(res.stderr)}")
+    # Codex's hook command finds the project from a subfolder (no absolute path).
+    hooks = json.loads(read(project / ".codex" / "hooks.json") or "{}")
+    command = hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"] if hooks else ""
+    if not WINDOWS:
+        res = subprocess.run(["sh", "-c", command], cwd=project / "Knowledge" / "Gotchas", env=env,
+                             input=prompt, text=True, encoding="utf-8", capture_output=True, timeout=120)
+        R.check("codex: hook command works from a subfolder", res.returncode == 0 and NOTE_PATH in res.stdout
+                and str(project) not in command, tail(res.stdout + res.stderr))
+    # An inherited TB_ROOT must not redirect the project's tb.
+    res = run([*tb, "kb", "lint"], project, dict(env, TB_ROOT=str(project / "Knowledge")))
+    R.check("tb ignores an inherited TB_ROOT", res.returncode == 0 and "TB_ROOT" in res.stderr
+            and "1 note checked" in res.stdout and not (project / "Knowledge" / "Runtime").exists(),
+            tail(output(res)))
+
+
+def stage_precommit_blocks(project: Path, env: dict, draft: Path) -> None:
+    """pre-commit checks what is committed: a staged broken note fixed only on disk, and secrets."""
+    draft.unlink()
+    bad = project / "Knowledge" / "Plans" / "broken.md"
+    bad.write_text("no frontmatter\n", encoding="utf-8")
+    run(["git", "add", "--", "Knowledge/Plans/broken.md"], project, env)
+    bad.write_text("---\ntype: plan\n---\n", encoding="utf-8")  # unstaged change must not hide the staged one
+    res = run(["git", "commit", "-m", "knowledge: broken"], project, env)
+    R.check("pre-commit lints the staged content", res.returncode != 0 and "broken.md" in output(res),
+            tail(output(res)))
+    run(["git", "reset", "--quiet", "--", "Knowledge/Plans/broken.md"], project, env)
+    bad.unlink()
+    leak = project / "Toolbox" / "leak.md"
+    leak.write_text("DB: postgres://app:" + "Prod1Passw0rd" + "@db.internal:5432/app\n", encoding="utf-8")
+    run(["git", "add", "--", "Toolbox/leak.md"], project, env)
+    res = run(["git", "commit", "-m", "toolbox: leak"], project, env)
+    R.check("pre-commit blocks a password in a URL", res.returncode != 0 and "url-credentials" in output(res),
+            tail(output(res)))
+    run(["git", "reset", "--quiet", "--", "Toolbox/leak.md"], project, env)
+    leak.unlink()
 
 
 def stage_next_release(origin: Path, lock: dict, env: dict, version: str) -> tuple[str, dict]:
@@ -331,13 +414,19 @@ def stage_next_release(origin: Path, lock: dict, env: dict, version: str) -> tup
                     if rec.get("class") == "managed" and p.startswith(".agents/skills/") and p.endswith("/SKILL.md"))
     if len(skills) < 2:
         raise Stop("need at least two managed skills in the lock")
-    changed, local_edit = skills[-1], skills[0]
+    if len(skills) < 4:
+        raise Stop("need at least four managed skills in the lock")
+    changed, local_edit, take, keep = skills[-1], skills[0], skills[1], skills[2]
     marker = f"<!-- smoke: template v{new} -->"
-    sources = payload_sources(origin, files[changed]["module"], changed)
-    if not sources:
-        raise Stop(f"no payload source for {changed}")
-    for src in sources:
-        src.write_text(read(src).rstrip("\n") + f"\n\n{marker}\n", encoding="utf-8")
+    for path in (changed, take, keep, "Knowledge/_templates/gotcha.md"):
+        sources = payload_sources(origin, files[path]["module"], path)
+        if not sources:
+            raise Stop(f"no payload source for {path}")
+        for src in sources:
+            src.write_text(read(src).rstrip("\n") + f"\n\n{marker}\n", encoding="utf-8")
+    removed = "Knowledge/Examples/README.md"
+    for src in payload_sources(origin, "knowledge", removed):
+        src.unlink()
     block_line = f"Smoke block line v{new}."
     for src in payload_sources(origin, "core", "AGENTS.md"):
         src.write_text(insert_after_marker(read(src), block_line), encoding="utf-8")
@@ -357,17 +446,21 @@ def stage_next_release(origin: Path, lock: dict, env: dict, version: str) -> tup
     git("tag", f"v{new}", cwd=origin, env=env)
     R.check(f"template v{new} released (skill, AGENTS block, new file, migration)", True)
     return new, {"changed": changed, "local_edit": local_edit, "marker": marker, "block_line": block_line,
-                 "new_file": new_file, "commit": git("rev-parse", "HEAD", cwd=origin, env=env)}
+                 "new_file": new_file, "take": take, "keep": keep, "removed": removed,
+                 "seeded": "Knowledge/_templates/gotcha.md",
+                 "commit": git("rev-parse", "HEAD", cwd=origin, env=env)}
 
 
 def stage_update(project: Path, env: dict, new: str, info: dict) -> None:
     tb = tb_cmd(project)
     local_line = "Local smoke edit."
     project_line = "Smoke project line."
-    for path, line in ((info["local_edit"], local_line), ("AGENTS.md", project_line)):
+    edited = (info["local_edit"], "AGENTS.md", info["take"], info["keep"], info["seeded"])
+    for path, line in ((info["local_edit"], local_line), ("AGENTS.md", project_line),
+                       (info["take"], local_line), (info["keep"], local_line), (info["seeded"], local_line)):
         target = project / path
         il.write_file(project, path, (read(target).rstrip("\n") + f"\n\n{line}\n").encode("utf-8"), text=True)
-    git("add", "--", info["local_edit"], "AGENTS.md", cwd=project, env=env)
+    git("add", "--", *edited, cwd=project, env=env)
     res = run(["git", "commit", "-m", "agents: local smoke edits"], project, env)
     R.require("git commit of local edits", res.returncode == 0, tail(output(res)))
 
@@ -376,7 +469,15 @@ def stage_update(project: Path, env: dict, new: str, info: dict) -> None:
     R.require("tb update fetch", res.returncode == 0 and (fetched / "setup" / "update.py").is_file(),
               tail(output(res)))
     script = f"Runtime/update/{new}/setup/update.py"
-    res = run([*tb, "run", script, "plan", "--project", str(project), "--json"], project, env)
+    res = run([*tb, "run", script, "plan", "--project", str(project), "--json", "--language", "en"], project, env)
+    try:
+        en = {f["path"]: f["status"] for f in json.loads(res.stdout)["files"]}
+    except (json.JSONDecodeError, KeyError):
+        en = {}
+    R.check("plan --language en: unchanged managed files are updated, AGENTS.md block too",
+            en.get(".agents/docs/concept.md") == "update" and en.get("AGENTS.md") == "update", tail(output(res)))
+    compose = ["--add-module", "devcontainer"]
+    res = run([*tb, "run", script, "plan", "--project", str(project), "--json", *compose], project, env)
     try:
         plan = json.loads(res.stdout)
     except json.JSONDecodeError:
@@ -384,7 +485,10 @@ def stage_update(project: Path, env: dict, new: str, info: dict) -> None:
     R.require("update.py plan --json", res.returncode == 0 and plan is not None, tail(output(res)))
     status = {f["path"]: f["status"] for f in plan["files"]}
     expected = {info["changed"]: "update", "AGENTS.md": "update", info["new_file"]: "add",
-                info["local_edit"]: "local-modified"}
+                info["local_edit"]: "local-modified", info["take"]: "conflict", info["keep"]: "conflict",
+                info["removed"]: "remove", info["seeded"]: "seeded-changed",
+                ".devcontainer/Dockerfile": "add", ".devcontainer/devcontainer.json": "add",
+                ".devcontainer/README.md": "add"}
     wrong = {p: status.get(p) for p, s in expected.items() if status.get(p) != s}
     R.check("plan: expected statuses", not wrong, f"got {wrong}")
     others = {p: s for p, s in status.items() if p not in expected and s != "unchanged"}
@@ -393,7 +497,8 @@ def stage_update(project: Path, env: dict, new: str, info: dict) -> None:
             f"{plan['migrations']}")
     R.check("plan: saved Runtime/update/plan.json", (project / "Runtime" / "update" / "plan.json").is_file())
 
-    res = run([*tb, "run", script, "apply", "--project", str(project), "--yes"], project, env)
+    res = run([*tb, "run", script, "apply", "--project", str(project), "--yes", *compose,
+               "--take-template", info["take"], "--keep-local", info["keep"]], project, env)
     R.require("update.py apply --yes", res.returncode == 0, tail(output(res)))
     R.check("apply: branch created", git("branch", "--show-current", cwd=project, env=env) == f"agentic/update-{new}")
     R.check("apply: managed skill updated", info["marker"] in read(project / info["changed"]))
@@ -402,13 +507,44 @@ def stage_update(project: Path, env: dict, new: str, info: dict) -> None:
             info["block_line"] in agents_md and project_line in agents_md)
     R.check("apply: new managed file added", (project / info["new_file"]).is_file())
     R.check("apply: local modification kept", local_line in read(project / info["local_edit"]))
+    R.check("apply: --take-template", info["marker"] in read(project / info["take"])
+            and local_line not in read(project / info["take"]))
+    R.check("apply: --keep-local", info["marker"] not in read(project / info["keep"])
+            and local_line in read(project / info["keep"]))
+    R.check("apply: removed file deleted", not (project / info["removed"]).exists())
+    R.check("apply: seeded file untouched", local_line in read(project / info["seeded"])
+            and info["marker"] not in read(project / info["seeded"]))
+    R.check("apply: --add-module devcontainer", (project / ".devcontainer" / "Dockerfile").is_file())
     R.check("apply: migration ran", (project / ".agents" / "smoke-migration.txt").is_file())
     lock = tomllib.loads(read(project / il.LOCK_PATH))
     R.check(f"apply: lock version {new}", lock["template"]["version"] == new
             and lock["template"]["commit"] == info["commit"], f"{lock['template']}")
+    R.check("apply: lock modules include devcontainer", "devcontainer" in lock["project"]["modules"]
+            and info["removed"] not in lock["files"], f"{lock['project']}")
     for args in (["kb", "lint"], ["agents", "link"], ["agents", "doctor"]):
         res = run([*tb, *args], project, env)
         R.check(f"after update: tb {' '.join(args)}", res.returncode == 0, tail(output(res)))
+
+
+def stage_dev_release(origin: Path, work: Path, env: dict, released: str) -> None:
+    """A project initialized from an unreleased (X.Y.Z-dev) template gets release X.Y.Z."""
+    dev = bump_minor(released) + "-dev"
+    (origin / il.VERSION_FILE).write_text(dev + "\n", encoding="utf-8")
+    git("commit", "--quiet", "--no-verify", "-am", f"start v{dev}", cwd=origin, env=env)
+    project = work / "dev-project"
+    git("clone", "--quiet", str(origin), str(project), cwd=work, env=env)
+    res = run([sys.executable, str(project / "setup" / "init.py"), "--name", "dev", "--yes", "--skip-setup"],
+              project, env, timeout=300)
+    R.check("init from a development state warns", res.returncode == 0 and "development state" in output(res),
+            tail(output(res)))
+    release = release_of(dev)
+    (origin / il.VERSION_FILE).write_text(release + "\n", encoding="utf-8")
+    git("commit", "--quiet", "--no-verify", "-am", f"release v{release}", cwd=origin, env=env)
+    git("tag", f"v{release}", cwd=origin, env=env)
+    res = run([*tb_cmd(project), "update", "fetch"], project, env)
+    R.check(f"v{dev} project: tb update fetch offers v{release}",
+            res.returncode == 0 and (project / "Runtime" / "update" / release / "setup" / "update.py").is_file(),
+            tail(output(res)))
 
 
 def main() -> int:
@@ -428,6 +564,7 @@ def main() -> int:
         stage_toolbox(project, env, work)
         new, info = stage_next_release(origin, lock, env, version)
         stage_update(project, env, new, info)
+        stage_dev_release(origin, work, env, new)
     except Stop as exc:
         if exc.recorded:
             print(f"Stopped after \"{exc}\"; the remaining steps were skipped.")

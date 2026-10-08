@@ -17,7 +17,7 @@
 - Write to Knowledge only what cannot be derived from Resources and git history. One note — one topic: find and update an existing note first. Rules — `Knowledge/README.md`.
 - Temporary files and one-off scripts go only in `Runtime/`. Permanent tools go in `Toolbox/`, with an entry in `Toolbox/README.md`.
 - Commit only when the human asks, with explicit paths only (no `git add -A`/`.`). Message: `<scope>: <summary>` + bullet points; scope — `knowledge|agents|toolbox|resources|agentic`.
-- Do not edit `.agents/agentic.lock` or the generated `.claude/`, `.codex/`: change `.agents/`, then run `Toolbox/tb agents link`.
+- Do not edit `.agents/agentic.lock` or the generated `.claude/`, `.codex/`, `CLAUDE.md`: change `.agents/`, then run `Toolbox/tb agents link`.
 - A needed resource is missing from `Resources/` — suggest `Toolbox/tb resources clone <name>`.
 - Never write secrets to `Knowledge/`, `Toolbox/`, `.agents/`.
 - Deleting data, updating the template, committing — only after the human confirms.

@@ -23,7 +23,7 @@ folders (documents, data). The template does not prescribe the content or the st
 |---|---|
 | `Toolbox/tb resources status` | What exists locally, the current branch, whether there are changes |
 | `Toolbox/tb resources clone <name>…` | Clone resources from the catalog; `--all` — all of them |
-| `Toolbox/tb resources add <url> [--name N] [--branch B] [--kind git\|folder] [--description "…"] [--clone]` | Add a resource to the catalog (with `--clone`, clone it right away) |
+| `Toolbox/tb resources add <url> [--name N] [--branch B] [--kind git\|folder] [--description "…"] [--clone]` | Add a resource to the catalog (with `--clone`, clone it right away). A path to a local working copy records its `origin` and warns about work that exists only in that copy |
 | `Toolbox/tb setup --clone-missing` | Clone all missing resources |
 
 On Windows (PowerShell): `Toolbox\tb.cmd resources …`.
@@ -34,6 +34,9 @@ On Windows (PowerShell): `Toolbox\tb.cmd resources …`.
 - If a resource has its own `AGENTS.md` or `CLAUDE.md` (at its root or in the working subdirectory), read them
   before working: the resource's own rules apply inside it, and different agents pick up nested instructions
   differently. These files belong to the resource — do not change them unless asked.
+- A resource's agent settings (`.claude/settings.json`, `.mcp.json`, `.codex/`, `.claude/skills`, …) are not
+  loaded by an agent started in the project root: its hooks, permissions and MCP servers do not apply.
+  `tb resources status` lists them; what the project needs goes into `.agents/`.
 - Commits to a resource repository are made only inside it and only when the human asks. Resource content
   never goes into the root repository.
 - A task lists the affected resources in its `resources` field (names from the catalog).

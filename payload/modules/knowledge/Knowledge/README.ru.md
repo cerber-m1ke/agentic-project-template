@@ -70,7 +70,7 @@ Plans (idea) ──► Tasks (active) ──► done ──► сбор итог
 | `Toolbox/tb kb search <запрос> [--type T] [--status S] [--resource R]` | Поиск по заголовкам, описаниям, синонимам, тегам и тексту |
 | `Toolbox/tb kb show <путь\|slug>` | Заметка целиком |
 | `Toolbox/tb kb related <путь\|slug>` | Ссылки и обратные ссылки |
-| `Toolbox/tb kb new <type> <slug> --title "…"` | Новая заметка из шаблона; `--folder` — задача-папка |
+| `Toolbox/tb kb new <type> <slug> --title "…" --description "…"` | Новая заметка из шаблона; `--folder` — задача-папка |
 | `Toolbox/tb kb index` | Индекс, сгруппированный по типам |
 | `Toolbox/tb kb lint` | Frontmatter, ссылки, имена файлов, бюджет `AGENTS.md` |
 | `Toolbox/tb kb stale` | Кандидаты на перепроверку |
@@ -80,7 +80,8 @@ Plans (idea) ──► Tasks (active) ──► done ──► сбор итог
 ## Шаблоны
 
 `_templates/` — шаблоны заметок, общие для `Toolbox/tb kb new` и Obsidian. Плейсхолдеры `{{title}}` и `{{date}}`
-подставляются при создании заметки. Заметками шаблоны не считаются.
+подставляются при создании заметки. Заметками шаблоны не считаются. Шаблоны принадлежат проекту: правьте
+их под себя — обновление шаблона только предложит свои изменения.
 
 ## Obsidian
 

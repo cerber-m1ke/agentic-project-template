@@ -21,16 +21,16 @@ description: Итоги сессии и сбор Знаний. Использу�
    - `status`: `active`, `blocked` (запиши причину) или `done`; поле `resources` — затронутые ресурсы;
    - `verified` — сегодняшняя дата.
    Работа шла без задачи, но продолжится — предложи создать:
-   `Toolbox/tb kb new task <slug> --title "…"`.
+   `Toolbox/tb kb new task <slug> --title "…" --description "…"`.
 3. **Задача завершена (`done`).** Разнеси «Итоги для Знаний» по Decisions, Gotchas, Entities,
    Examples и предложи человеку удалить файл задачи — он останется в истории git.
-4. **Отложенное и идеи** → Plans: `Toolbox/tb kb new plan <slug> --title "…"` (статус `idea`).
-5. **Грабли** → Gotchas: `Toolbox/tb kb new gotcha <slug> --title "…"` — симптом, причина, обход,
+4. **Отложенное и идеи** → Plans: `Toolbox/tb kb new plan <slug> --title "…" --description "…"` (статус `idea`).
+5. **Грабли** → Gotchas: `Toolbox/tb kb new gotcha <slug> --title "…" --description "…"` — симптом, причина, обход,
    как проверить актуальность; версии — в `applies_to` (`node@22`).
-6. **Решения, которые переживут задачу** → предложи ADR: `Toolbox/tb kb new decision <slug> --title "…"`
+6. **Решения, которые переживут задачу** → предложи ADR: `Toolbox/tb kb new decision <slug> --title "…" --description "…"`
    со статусом `proposed`. В `accepted` переводи только с согласия человека.
 7. **Сущности.** Узнал новое о сервисе, модуле, хранилище (связи, инварианты, владельцы) — обнови
-   карточку в Entities или создай: `Toolbox/tb kb new entity <slug> --title "…"`.
+   карточку в Entities или создай: `Toolbox/tb kb new entity <slug> --title "…" --description "…"`.
 8. **Перепроверенное.** Если в сессии сверил заметку с Ресурсами и она верна — поставь `verified`
    на сегодняшнюю дату. Устаревшую исправь или смени статус (`resolved`, `outdated`, `deprecated`,
    `superseded` с `superseded_by`).

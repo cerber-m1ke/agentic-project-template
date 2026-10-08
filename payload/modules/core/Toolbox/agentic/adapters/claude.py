@@ -1,4 +1,5 @@
-"""Claude Code renderer: .claude/settings.json, .claude/agents/<name>.md, .mcp.json.
+"""Claude Code renderer: CLAUDE.md (imports AGENTS.md), .claude/settings.json,
+.claude/agents/<name>.md, .mcp.json.
 
 Skills are linked per skill by agents.py ([skills] mode = "link" in adapter.toml).
 JSON allows no comments, so only the subagent files carry the "generated" note.
@@ -73,8 +74,18 @@ def _subagent(ctx: Context, agent) -> str:
     return f"---\n# {GENERATED_NOTE}\n{front}---\n\n{agent.prompt}"
 
 
+def _instructions(ctx: Context) -> tuple[str, str] | None:
+    section = ctx.section("instructions")
+    if not section.get("target") or not section.get("import"):
+        return None
+    return str(section["target"]), f"<!-- {GENERATED_NOTE} -->\n@{section['import']}\n"
+
+
 def render(ctx: Context) -> dict[str, str]:
     files: dict[str, str] = {}
+    instructions = _instructions(ctx)
+    if instructions:
+        files[instructions[0]] = instructions[1]
     for path, doc in _settings(ctx).items():
         files[path] = dump_json(doc)
     mcp_target = ctx.section("mcp").get("target")

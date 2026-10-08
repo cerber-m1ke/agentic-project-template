@@ -7,7 +7,9 @@ to work is on the host; the container is for these cases.
 ## Contents
 
 - Debian, git, curl, ripgrep, uv (the same version pinned in `Toolbox/tb`).
-- Claude Code and Codex CLI, installed with the official installers.
+- Claude Code and Codex CLI, installed with the official installers. Versions: `build.args` in
+  `devcontainer.json` (`CLAUDE_CODE_VERSION`, `CODEX_VERSION`): the `stable`/`latest` channels by default;
+  pin exact versions for a reproducible sandbox. `devcontainer.json` belongs to the project.
 - A `dev` user without sudo.
 - After the container is created, `Toolbox/tb setup --agents claude,codex` runs.
 

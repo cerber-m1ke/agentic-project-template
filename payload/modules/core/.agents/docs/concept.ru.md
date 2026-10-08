@@ -11,8 +11,8 @@ Agentic Project — рабочая среда, в которой Агент ра
 
 Принципы:
 
-- `.agents/` — единственный источник правды для системного. `.claude/`, `.codex/`, `.mcp.json`
-  генерируются `tb agents link` и в git не попадают.
+- `.agents/` — единственный источник правды для системного. `.claude/`, `.codex/`, `.mcp.json`,
+  `CLAUDE.md` (импортирует `AGENTS.md`) генерируются `tb agents link` и в git не попадают.
 - Достаточно уровня 0: читать `AGENTS.md` и выполнять команды. Нативные skills, субагенты и хуки —
   улучшение, а не требование.
 - Память проекта — только `Knowledge/`, не встроенная память агента (`~/.claude`, `~/.codex`).
@@ -47,11 +47,11 @@ Agentic Project — рабочая среда, в которой Агент ра
 |---|---|---|
 | `managed` | шаблон | Не правь. Локальная правка при обновлении станет конфликтом. Проектное — в файлы проекта |
 | `seeded` | проект | Правь свободно: шаблон создал файл один раз и больше не трогает |
-| `block` | смешанный | Правь только вне маркеров `agentic:begin` / `agentic:end`; блок между ними обновляет шаблон |
+| `block` | смешанный | `AGENTS.md`, `.gitignore`, `.gitattributes`, `.ignore`: правь только вне маркеров `agentic:begin` / `agentic:end`, строки маркеров не удаляй; блок между ними обновляет шаблон |
 | нет в lock | проект | Правь свободно |
 
-Генерируемые `.claude/`, `.codex/`, `.mcp.json` не правь: меняй источник в `.agents/`, затем
-`Toolbox/tb agents link`.
+Генерируемые `.claude/`, `.codex/`, `.mcp.json`, `CLAUDE.md` не правь: меняй источник в `.agents/`, затем
+`Toolbox/tb agents link`. Заметки только для Claude — `.claude/CLAUDE.md` или `CLAUDE.local.md`.
 
 ## Знания
 
@@ -79,6 +79,9 @@ Agentic Project — рабочая среда, в которой Агент ра
   `Resources/README.md`, `Resources/resources.toml`. Не в git: `Resources/*`, `Runtime/`, выходы
   адаптеров, `.agents/local.toml`, `Knowledge/.obsidian/`, `.env*`.
 - Ресурсы коммитятся внутри себя: `git -C Resources/<name> …`.
+- Настройки агентов внутри ресурсов (`.claude/settings.json`, `.mcp.json`, `.codex/`, skills) агент,
+  запущенный из корня, не загружает — нужное проекту переносится в `.agents/` (`tb resources status`
+  их перечисляет).
 - Коммиты — по просьбе, явными путями, формат `<scope>: <суть>`; scopes: `knowledge`, `agents`,
   `toolbox`, `resources`, `agentic`.
 

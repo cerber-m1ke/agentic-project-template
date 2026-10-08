@@ -20,14 +20,14 @@ in the output are relative to the project root.
 | `tb setup [--agents a,b] [--clone-missing]` | Machine setup: uv, adapters, git, Obsidian, Resources |
 | `tb kb search <query> [--type T] [--status S] [--resource R]` | Search Knowledge |
 | `tb kb show <path\|slug>`, `tb kb related <path\|slug>` | Full note; links and backlinks |
-| `tb kb new <type> <slug> [--title T] [--folder]` | New note from `Knowledge/_templates/` |
-| `tb kb index`, `tb kb lint`, `tb kb stale` | Index; validation of Knowledge and `AGENTS.md`; candidates for re-verification |
+| `tb kb new <type> <slug> [--title T] [--description D] [--folder]` | New note from `Knowledge/_templates/` |
+| `tb kb index [--base DIR]`, `tb kb lint [--staged]`, `tb kb stale` | Index; validation of Knowledge and `AGENTS.md` (`--staged` — what goes into the commit); candidates for re-verification |
 | `tb secrets scan [--staged] [paths…]` | Secret scan |
 | `tb agents list\|link\|unlink\|doctor` | Agent adapters on this machine |
 | `tb resources status\|clone\|add` | Resources: status, cloning, adding to the catalog |
 | `tb obsidian setup` | Obsidian vault configuration |
-| `tb update fetch` | Download a fresh template release into `Runtime/update/` (next — skill `agentic-update`) |
-| `tb hook <name> [--agent A]` | Hook handlers; called by agents, not by hand |
+| `tb update fetch [--ref vX.Y.Z]` | Download a fresh (or the given) template release into `Runtime/update/` (next — skill `agentic-update`) |
+| `tb hook <name> [--agent A]` | Hook handlers; called by agents, not by hand. Never block the agent and never download anything |
 | `tb run <script> [args…]` | Run a script via uv |
 
 ## Adding a project tool

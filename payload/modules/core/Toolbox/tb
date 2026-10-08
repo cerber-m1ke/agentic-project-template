@@ -9,8 +9,14 @@
 # below and unpack it into Runtime/tools/uv/. Python and caches go to Runtime/ as well, so nothing
 # is installed globally. Delete Runtime/ to reset; the next call rebuilds it.
 #
+# `tb hook ...` (agent hooks) never blocks the agent: it exits 0 whatever happens, never downloads
+# uv, Python or packages (it runs offline and silently does nothing until `tb setup` prepared
+# Runtime/), so a prompt is never held up or rejected by a missing runtime.
+#
 # Environment:
-#   TB_ROOT                   project root override (default: the parent of Toolbox/)
+#   TB_ROOT                   root override for running the template's own tb (template
+#                             development, init). It must contain .agents/agentic.lock or
+#                             setup/VERSION, and it is ignored by the tb of an initialized project.
 #   AGENTIC_UV_DOWNLOAD_URL   base URL of uv releases (default: GitHub); the asset is fetched
 #                             from <base>/<version>/<asset>
 #   HTTPS_PROXY               used by curl/wget and by uv
@@ -217,12 +223,22 @@ case $0 in
   *) tb_dir=. ;;
 esac
 tb_dir=$(cd -P -- "${tb_dir:-/}" 2>/dev/null && pwd -P) || die "cannot resolve the Toolbox directory from $0"
+tb_home=${tb_dir%/*}
+[ -n "$tb_home" ] || tb_home=/
+ROOT=$tb_home
 if [ -n "${TB_ROOT-}" ]; then
-  ROOT=$(cd -P -- "$TB_ROOT" 2>/dev/null && pwd -P) || die "TB_ROOT is not a directory: $TB_ROOT"
-else
-  ROOT=${tb_dir%/*}
-  [ -n "$ROOT" ] || ROOT=/
+  tb_root=$(cd -P -- "$TB_ROOT" 2>/dev/null && pwd -P) || die "TB_ROOT is not a directory: $TB_ROOT"
+  if [ "$tb_root" != "$tb_home" ] && [ -f "$tb_home/.agents/agentic.lock" ]; then
+    # An inherited TB_ROOT (e.g. from template development) must not redirect a project's tb.
+    note "TB_ROOT=$TB_ROOT ignored: this Toolbox/tb belongs to the project $tb_home"
+  elif [ -f "$tb_root/.agents/agentic.lock" ] || [ -f "$tb_root/setup/VERSION" ]; then
+    ROOT=$tb_root
+  else
+    die "TB_ROOT=$TB_ROOT is neither an agentic project nor the template (no .agents/agentic.lock or setup/VERSION)"
+  fi
 fi
+tb_hook=
+[ "${1-}" = hook ] && tb_hook=1
 if [ -n "$tb_windows" ] && command -v cygpath >/dev/null 2>&1; then
   # Native Windows programs (uv, Python) need C:/... paths; MSYS tools accept them too.
   ROOT=$(cygpath -m "$ROOT")
@@ -244,6 +260,9 @@ if tb_uv=$(command -v uv 2>/dev/null) && uv_usable "$tb_uv"; then
   :
 elif [ -x "$uv_dir/uv$exe" ]; then
   tb_uv=$uv_dir/uv$exe
+elif [ -n "$tb_hook" ]; then
+  note "hook skipped: uv is not installed in Runtime/ yet (run Toolbox/tb setup)"
+  exit 0
 else
   tb_tmp=
   trap 'if [ -n "$tb_tmp" ]; then rm -rf "$tb_tmp"; fi' EXIT
@@ -253,6 +272,14 @@ else
   install_uv
   trap - EXIT INT TERM HUP
   tb_uv=$uv_dir/uv$exe
+fi
+
+if [ -n "$tb_hook" ]; then
+  # Offline and without Python downloads: fail fast instead of downloading inside a hook, and
+  # report success whatever uv returns (exit code 2 would block the prompt in Claude Code).
+  UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never "$tb_uv" run --no-project --quiet "$tb_dir/agentic/cli.py" "$@" ||
+    note "hook skipped: the runtime is not ready (run Toolbox/tb setup)"
+  exit 0
 fi
 
 if [ "$UV_PYTHON_PREFERENCE" = only-managed ] && [ ! -d "$UV_PYTHON_INSTALL_DIR" ]; then

@@ -1,8 +1,10 @@
-"""tb secrets scan — look for high-confidence secret patterns (keys, tokens, private keys).
+"""tb secrets scan — look for secrets: provider keys and tokens, private keys, JWTs, passwords in
+URLs and in `password = …`-style assignments.
 
-Only patterns with a very low false-positive rate are checked. A line that contains the marker
-`agentic:allow-secret` is skipped. The patterns are assembled from parts so this file never
-matches itself.
+Provider formats are matched exactly; the generic patterns (assignments, URLs, Bearer) only report
+values that look like real secrets (letters and digits, no placeholders such as `<password>`,
+`${TOKEN}`, `changeme`, `example`). A line that contains the marker `agentic:allow-secret` is
+skipped. The patterns are assembled from parts so this file never matches itself.
 """
 
 from __future__ import annotations
@@ -22,27 +24,55 @@ SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", ".mypy_cache", ".py
 MAX_FILE_BYTES = 10 * 1024 * 1024
 
 _TAIL = r"(?![A-Za-z0-9_-])"  # token must not continue
+_KEYWORDS = ("pass" + "word|passwd|passphrase|pwd|sec" + "ret|tok" + "en|api[_-]?key|access[_-]?key|"
+             "private[_-]?key|client[_-]?sec" + "ret|паро" + "ль|токе" + "н")
 
-# (kind, needles, regex). The regex runs only when one of the plain-text needles occurs in the text.
-# Prefixes are split so the source does not contain a literal token start.
-PATTERNS: list[tuple[str, tuple[str, ...], re.Pattern[str]]] = [
-    ("private-key", ("PRIVATE KEY",),
-     re.compile("-----" + "BEGIN" + r" (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----")),
-    ("aws-access-key", ("AK" + "IA",),
-     re.compile(r"(?<![A-Za-z0-9])" + "AK" + r"IA[0-9A-Z]{16}(?![A-Za-z0-9])")),
+# (kind, needles, regex, value group). The regex runs only when one of the needles occurs in the
+# lower-cased text; the value group is what gets checked and reported. Prefixes are split so the
+# source does not contain a literal token start.
+PATTERNS: list[tuple[str, tuple[str, ...], re.Pattern[str], int]] = [
+    ("private-key", ("private key",),
+     re.compile("-----" + "BEGIN" + r" (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"), 0),
+    ("aws-access-key", ("ak" + "ia",),
+     re.compile(r"(?<![A-Za-z0-9])" + "AK" + r"IA[0-9A-Z]{16}(?![A-Za-z0-9])"), 0),
+    ("aws-secret-key", ("aws",),
+     re.compile(r"(?i)aws[A-Za-z0-9_.-]{0,20}?(?:sec" + r"ret|sk)[A-Za-z0-9_.-]{0,20}?[\"']?\s*[=:]\s*"
+                r"[\"']?([A-Za-z0-9/+]{40})(?![A-Za-z0-9/+])"), 1),
     ("github-token", tuple("gh" + c + "_" for c in "pousr"),
-     re.compile(r"(?<![A-Za-z0-9_])" + "gh" + r"[pousr]_[A-Za-z0-9]{36,}" + _TAIL)),
+     re.compile(r"(?<![A-Za-z0-9_])" + "gh" + r"[pousr]_[A-Za-z0-9]{36,}" + _TAIL), 0),
     ("github-token", ("github" + "_pat_",),
-     re.compile(r"(?<![A-Za-z0-9_])" + "github" + r"_pat_[A-Za-z0-9_]{50,}" + _TAIL)),
+     re.compile(r"(?<![A-Za-z0-9_])" + "github" + r"_pat_[A-Za-z0-9_]{50,}" + _TAIL), 0),
+    ("gitlab-token", ("gl" + "pat-",),
+     re.compile(r"(?<![A-Za-z0-9_])" + "gl" + r"pat-[A-Za-z0-9_-]{20,}" + _TAIL), 0),
+    ("npm-token", ("np" + "m_",),
+     re.compile(r"(?<![A-Za-z0-9_])" + "np" + r"m_[A-Za-z0-9]{36}" + _TAIL), 0),
     ("slack-token", ("xo" + "x",),
-     re.compile(r"(?<![A-Za-z0-9_])" + "xo" + r"x[abprs]-(?:[A-Za-z0-9]+-)+[A-Za-z0-9]+" + _TAIL)),
+     re.compile(r"(?<![A-Za-z0-9_])" + "xo" + r"x[abprs]-(?:[A-Za-z0-9]+-)+[A-Za-z0-9]+" + _TAIL), 0),
+    ("slack-webhook", ("hooks.slack" + ".com/services/",),
+     re.compile(r"hooks\.slack" + r"\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]{16,}"), 0),
+    ("telegram-bot-token", (":aa",),
+     re.compile(r"(?<![0-9])[0-9]{8,10}:" + "AA" + r"[A-Za-z0-9_-]{33}" + _TAIL), 0),
     ("api-key", ("s" + "k-",),
-     re.compile(r"(?<![A-Za-z0-9_-])" + "s" + r"k-(?:ant-)?[A-Za-z0-9_-]{20,}" + _TAIL)),
-    ("google-api-key", ("AI" + "za",),
-     re.compile(r"(?<![A-Za-z0-9_])" + "AI" + r"za[0-9A-Za-z_-]{35}" + _TAIL)),
+     re.compile(r"(?<![A-Za-z0-9_-])" + "s" + r"k-(?:ant-)?[A-Za-z0-9_-]{20,}" + _TAIL), 0),
+    ("google-api-key", ("ai" + "za",),
+     re.compile(r"(?<![A-Za-z0-9_])" + "AI" + r"za[0-9A-Za-z_-]{35}" + _TAIL), 0),
     ("stripe-live-key", ("_live_",),
-     re.compile(r"(?<![A-Za-z0-9_])" + r"(?:s|r)k" + "_live_" + r"[0-9A-Za-z]{16,}" + _TAIL)),
+     re.compile(r"(?<![A-Za-z0-9_])" + r"(?:s|r)k" + "_live_" + r"[0-9A-Za-z]{16,}" + _TAIL), 0),
+    ("jwt", ("ey" + "j",),
+     re.compile(r"(?<![A-Za-z0-9_-])" + "ey" + r"J[A-Za-z0-9_-]{10,}\.ey" + r"J[A-Za-z0-9_-]{10,}"
+                r"\.[A-Za-z0-9_-]{10,}" + _TAIL), 0),
+    ("bearer-token", ("bearer",),
+     re.compile(r"(?i)\bbearer\s+([A-Za-z0-9._~+/-]{20,}=*)"), 1),
+    ("url-credentials", ("://",),
+     re.compile(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@'\"<>]+:([^\s/@'\"<>]+)@[A-Za-z0-9.-]"), 1),
+    ("password-assignment", ("pass", "pwd", "sec" + "ret", "tok" + "en", "key", "паро" + "ль", "токе" + "н"),
+     re.compile(r"(?i)(?<![\w])[\w.-]*?(?:" + _KEYWORDS + r")[\"']?[ \t]*[=:][ \t]*[\"']?"
+                r"([^\s\"'`,;<>()\[\]{}]{8,})"), 1),
 ]
+GENERIC = {"bearer-token", "url-credentials", "password-assignment"}
+_PLACEHOLDER_RE = re.compile(r"(?i)example|placeholder|changeme|change-me|dummy|sample|redacted|"
+                             r"your[_-]|xxx|\*\*\*|\.\.\.|^[<$%{*]|^(?:true|false|null|none)$")
+_PATHLIKE_RE = re.compile(r"(?i)^(?:/|\./|~/|[a-z]:\\)|\.(?:txt|json|pem|key|ya?ml|toml|env|crt|md)$")
 
 
 @dataclass
@@ -69,10 +99,18 @@ def mask(value: str) -> str:
 
 
 def _plausible(kind: str, value: str) -> bool:
-    """Extra sanity checks for the generic `sk-…` pattern (kebab-case words are not keys)."""
-    if kind == "api-key":
+    """Extra checks for patterns that also match ordinary text."""
+    if kind == "api-key":  # kebab-case words such as `sk-learn-…` are not keys
         body = value[3:]
         return any(c.isdigit() for c in body) and any(c.isalpha() for c in body)
+    if kind == "aws-secret-key":  # AWS documentation keys end with EXAMPLEKEY
+        return not _PLACEHOLDER_RE.search(value)
+    if kind in GENERIC:
+        if _PLACEHOLDER_RE.search(value) or _PATHLIKE_RE.search(value):
+            return False
+        if kind == "bearer-token" and value.startswith("ey" + "J"):
+            return False  # reported as jwt
+        return any(c.isdigit() for c in value) and any(c.isalpha() for c in value)
     return True
 
 
@@ -85,18 +123,24 @@ def _kind_name(kind: str, value: str) -> str:
 def scan_text(text: str, path: str = "") -> list[Finding]:
     """Scan text; return findings (line numbers are 1-based)."""
     findings: list[Finding] = []
-    for kind, needles, rx in PATTERNS:  # whole-text passes; line numbers only for matches (fast)
-        if not any(n in text for n in needles):
+    lower = text.lower()
+    seen: set[tuple[int, str]] = set()
+    for kind, needles, rx, group in PATTERNS:  # whole-text passes; line numbers only for matches
+        if not any(n in lower for n in needles):
             continue
         for m in rx.finditer(text):
-            value = m.group(0)
+            value = m.group(group)
             if not _plausible(kind, value):
                 continue
             start = text.rfind("\n", 0, m.start()) + 1
             end = text.find("\n", m.end())
             if ALLOW_MARKER in text[start:end if end != -1 else len(text)]:
                 continue
-            findings.append(Finding(path, text.count("\n", 0, m.start()) + 1, _kind_name(kind, value), value))
+            line = text.count("\n", 0, m.start()) + 1
+            if (line, value) in seen:  # e.g. a provider token inside an assignment
+                continue
+            seen.add((line, value))
+            findings.append(Finding(path, line, _kind_name(kind, value), value))
     findings.sort(key=lambda f: f.line)
     return findings
 

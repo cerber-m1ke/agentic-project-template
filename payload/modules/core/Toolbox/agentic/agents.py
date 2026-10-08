@@ -28,7 +28,7 @@ def _modified(verb: str = "link") -> str:
             "override such as .claude/settings.local.json), then delete the file or run "
             f"Toolbox/tb agents {verb} --force (keeps a .bak copy)")
 
-SHADOW_FILES = ("CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md")
+INSTRUCTIONS = "AGENTS.md"
 
 
 # --- CLI ---------------------------------------------------------------------------
@@ -203,11 +203,19 @@ def _read(path: Path) -> str | None:
         return None
 
 
+def _is_instructions_alias(root: Path, file: Path) -> bool:
+    """A link to AGENTS.md (e.g. a hand-made CLAUDE.md alias): same meaning as a generated import."""
+    return common.is_link(file) and file.resolve() == (root / INSTRUCTIONS).resolve()
+
+
 def _ownership(root: Path, path: str, rendered: str | None, generated: dict[str, str]) -> str:
-    """absent | directory | ours | modified (changed outside tb) | foreign (never tb's file)."""
+    """absent | directory | ours | alias (link to AGENTS.md) | modified (changed outside tb) |
+    foreign (never tb's file)."""
     file = root / path
     if not (file.exists() or common.is_link(file)):
         return "absent"
+    if _is_instructions_alias(root, file):
+        return "alias"
     if file.is_dir() and not common.is_link(file):
         return "directory"
     current = _read(file)  # None for links and unreadable files
@@ -252,6 +260,8 @@ def _sync_files(root: Path, manifest: dict[str, Any], rendered: dict[str, str],
         if state == "directory":
             problems.append(f"{path}: is a directory, not written")
             continue
+        if state == "alias" and not apply:
+            continue  # works as is; `link` replaces it with the generated file
         if state == "modified" and not force:
             problems.append(f"{path}: {_modified()}")
             continue
@@ -262,6 +272,9 @@ def _sync_files(root: Path, manifest: dict[str, Any], rendered: dict[str, str],
         try:
             if state == "modified":
                 note = f" (previous content saved to {_backup(root, path)})"
+            elif state == "alias":
+                common.remove_link(file)  # never write through the link into AGENTS.md
+                note = f" (replaces a link to {INSTRUCTIONS})"
             common.write_text(file, content)
         except OSError as exc:
             problems.append(f"{path}: cannot write: {exc}")
@@ -272,7 +285,7 @@ def _sync_files(root: Path, manifest: dict[str, Any], rendered: dict[str, str],
         if path in rendered:
             continue
         state = _ownership(root, path, None, generated)
-        if state in ("absent", "directory", "foreign"):
+        if state in ("absent", "directory", "foreign", "alias"):
             if apply and state == "absent":
                 generated.pop(path, None)
             continue
@@ -408,7 +421,7 @@ def unlink(names: list[str] | None = None, force: bool = False) -> int:
         rendered = adapters.render(adapters.load_context(root, name, manifest))
         for path in adapters.owned_files(root, manifest, generated):
             state = _ownership(root, path, rendered.get(path), generated)
-            if state in ("directory", "foreign"):
+            if state in ("directory", "foreign", "alias"):
                 continue
             if state == "modified" and not force:
                 problems.append(f"{path}: {_modified('unlink')}")
@@ -447,10 +460,11 @@ def _gitignore_block(root: Path) -> list[str] | None:
     if not path.is_file():
         return None
     lines = common.normalize_newlines(common.read_text(path)).split("\n")
-    start = next((i for i, line in enumerate(lines) if "agentic:begin" in line), None)
+    start = next((i for i, line in enumerate(lines) if common.MARKER_RE["begin"].match(line)), None)
     if start is None:
         return lines
-    end = next((i for i in range(start + 1, len(lines)) if "agentic:end" in lines[i]), len(lines))
+    end = next((i for i in range(start + 1, len(lines)) if common.MARKER_RE["end"].match(lines[i])),
+               len(lines))
     return lines[start + 1:end]
 
 
@@ -480,17 +494,28 @@ def _general_checks(root: Path, available: dict[str, dict], line) -> None:
         else:
             line("✗", "Toolbox/tb not executable — run: sh Toolbox/tb setup")
 
-    agents_md = root / "AGENTS.md"
-    shadows = [name for name in SHADOW_FILES if (root / name).exists() or common.is_link(root / name)]
-    for name in shadows:
-        path = root / name
-        if path.is_symlink() and agents_md.is_file() and path.resolve() == agents_md.resolve():
-            line("✓", f"{name} is a link to AGENTS.md")
+    # Claude Code reads CLAUDE.md and, only without it, AGENTS.md: a CLAUDE.md must import AGENTS.md.
+    claude_md = root / "CLAUDE.md"
+    if claude_md.exists() or common.is_link(claude_md):
+        text = _read(claude_md) or ""
+        if _is_instructions_alias(root, claude_md) or any(
+                l.strip() == f"@{INSTRUCTIONS}" for l in text.split("\n")):
+            line("✓", f"CLAUDE.md imports {INSTRUCTIONS}")
         else:
-            line("!", f"{name} exists — Claude Code reads it instead of AGENTS.md "
-                      "(delete it or make it a link to AGENTS.md)")
-    if not shadows:
-        line("✓", "no CLAUDE.md: Claude Code reads AGENTS.md")
+            line("✗", f"CLAUDE.md does not import {INSTRUCTIONS}: Claude Code would not see the project "
+                      f"instructions — move its content to {INSTRUCTIONS} (Claude-only notes: "
+                      ".claude/CLAUDE.md), then run Toolbox/tb agents link claude --force")
+
+    resources_dir = root / "Resources"
+    if resources_dir.is_dir():
+        import resources  # local import: agents.py is also used without the resources module
+
+        found = [f"Resources/{p.name}/ ({', '.join(resources.agent_configs(p))})"
+                 for p in sorted(resources_dir.iterdir())
+                 if p.is_dir() and not p.name.startswith(".") and resources.agent_configs(p)]
+        if found:
+            line("!", "agent settings inside resources are not loaded from the project root (move what "
+                      "the project needs into .agents/): " + "; ".join(found))
 
     block = _gitignore_block(root)
     if block is None:

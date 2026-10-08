@@ -10,6 +10,10 @@ FROM debian:13-slim
 ARG USERNAME=dev
 ARG USER_UID=1000
 ARG USER_GID=1000
+# Agent CLI versions: a release channel (stable/latest) or an exact version such as 2.1.300 / 0.130.0.
+# Pin exact versions in devcontainer.json ("build.args") for a reproducible sandbox.
+ARG CLAUDE_CODE_VERSION=stable
+ARG CODEX_VERSION=latest
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -42,11 +46,11 @@ USER ${USERNAME}
 # and belong to the user so that new volumes get the same owner.
 RUN mkdir -p "/home/${USERNAME}/.claude" "/home/${USERNAME}/.codex" "/home/${USERNAME}/.local/bin"
 
-# Claude Code, native installer: https://code.claude.com/docs/en/setup
-RUN curl -fsSL https://claude.ai/install.sh | bash
+# Claude Code, native installer: https://code.claude.com/docs/en/setup (argument: stable|latest|X.Y.Z)
+RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
 
 # Codex CLI, standalone installer: https://github.com/openai/codex#installing-and-running-codex-cli
 # The installer keeps program files under CODEX_HOME; point it elsewhere for the install so the
 # program stays in the image instead of the ~/.codex volume (which only keeps login and config).
 RUN curl -fsSL https://chatgpt.com/codex/install.sh \
-    | CODEX_HOME="/home/${USERNAME}/.local/share/codex" CODEX_NON_INTERACTIVE=1 sh
+    | CODEX_HOME="/home/${USERNAME}/.local/share/codex" CODEX_NON_INTERACTIVE=1 CODEX_RELEASE="${CODEX_VERSION}" sh

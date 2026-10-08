@@ -1,7 +1,8 @@
 #!/bin/sh
 # Git pre-commit hook of an Agentic Project (enabled by `Toolbox/tb setup` through
 # core.hooksPath=.agents/git-hooks).
-#   - staged changes under Knowledge/  -> Toolbox/tb kb lint --quiet
+#   - staged changes under Knowledge/  -> Toolbox/tb kb lint --staged --quiet (the notes as they
+#                                         will be committed; unstaged drafts do not matter)
 #   - always                           -> Toolbox/tb secrets scan --staged
 # Any failure aborts the commit.
 
@@ -18,7 +19,7 @@ fi
 
 status=0
 if ! git diff --cached --quiet -- Knowledge/; then
-  sh "$tb" kb lint --quiet || status=1
+  sh "$tb" kb lint --staged --quiet || status=1
 fi
 sh "$tb" secrets scan --staged || status=1
 

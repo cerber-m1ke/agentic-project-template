@@ -1,2 +1,8 @@
-# Let ripgrep (and agents that search with it) see Resources/ despite .gitignore; nested .gitignore files still apply.
+# Search rules for ripgrep and the agents that use it (.gitignore syntax). The block between the
+# agentic markers is managed by the template and replaced on update.
+# agentic:begin
+# Let ripgrep see Resources/ despite .gitignore; nested .gitignore files still apply.
 !/Resources/*
+# agentic:end
+
+# Project-specific rules go below this line.

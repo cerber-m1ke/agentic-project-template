@@ -1,7 +1,11 @@
 {
   "name": "{{agentic.project_name}}",
   "build": {
-    "dockerfile": "Dockerfile"
+    "dockerfile": "Dockerfile",
+    "args": {
+      "CLAUDE_CODE_VERSION": "stable",
+      "CODEX_VERSION": "latest"
+    }
   },
   "remoteUser": "dev",
   "mounts": [

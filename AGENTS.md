@@ -41,6 +41,10 @@
 - Python: `>=3.12`, PEP 723 с `exclude-newer`, только stdlib + `pyyaml`, `tomli-w`, `snowballstemmer`.
   Сообщения `tb`, `init.py`, `update.py` — на английском.
 - Изменил формат проекта или Знаний — добавь миграцию в `setup/migrations/`.
+- Между релизами `setup/VERSION` = следующая версия с `-dev` (`0.1.1-dev`). Изменение требует шага больше
+  (minor/major, DESIGN §5.4) — подними её; суффикс снимает только релизный коммит.
+- Маркер блока — целая строка `<!-- agentic:begin -->` / `# agentic:begin`. Новый `block`-файл — маркеры
+  в payload и путь в `block` модуля.
 - Файлы агентов в payload — повелительно и кратко: `AGENTS.md` проекта ≤ ~1500 токенов.
 - Коммиты и теги — только по просьбе человека.
 
@@ -60,6 +64,7 @@ uv и Python скачиваются в `Runtime/` шаблона.
 
 ```sh
 TB_ROOT=. payload/modules/core/Toolbox/tb run setup/i18n_check.py
+TB_ROOT=. payload/modules/core/Toolbox/tb run setup/tests/unit_test.py
 TB_ROOT=. payload/modules/core/Toolbox/tb run setup/tests/smoke_test.py
 ```
 
@@ -68,6 +73,7 @@ Windows (cmd):
 ```bat
 set TB_ROOT=.
 payload\modules\core\Toolbox\tb.cmd run setup\i18n_check.py
+payload\modules\core\Toolbox\tb.cmd run setup\tests\unit_test.py
 payload\modules\core\Toolbox\tb.cmd run setup\tests\smoke_test.py
 ```
 
@@ -75,8 +81,9 @@ payload\modules\core\Toolbox\tb.cmd run setup\tests\smoke_test.py
 
 1. Раздел версии в `CHANGELOG.md`: «Добавлено», «Изменено», «Исправлено» и обязательно «Миграции»;
    дата вместо «не выпущено».
-2. Новая версия в `setup/VERSION` (semver, DESIGN §5.4).
+2. Версия в `setup/VERSION` без `-dev` (semver, DESIGN §5.4).
 3. Миграции — `setup/migrations/<x.y.z>_<name>.py` с `migrate(root: Path) -> None`, детерминированные
    и идемпотентные.
-4. i18n-проверка и smoke-тест зелёные.
-5. Коммит и тег `vX.Y.Z`.
+4. i18n-проверка, unit- и smoke-тесты зелёные.
+5. Коммит и тег `vX.Y.Z` на нём.
+6. Следующим коммитом — `setup/VERSION` = следующий patch с `-dev` и раздел «не выпущено» в `CHANGELOG.md`.

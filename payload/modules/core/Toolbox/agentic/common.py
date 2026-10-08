@@ -34,6 +34,11 @@ KNOWLEDGE_TYPES: dict[str, dict[str, Any]] = {
 }
 FOLDER_TO_TYPE = {spec["folder"]: name for name, spec in KNOWLEDGE_TYPES.items()}
 
+# Managed-block markers: whole lines `<!-- agentic:begin -->` / `# agentic:begin` (same rule as
+# setup/installer_lib.py); prose that mentions the words is not a marker.
+MARKER_RE = {kind: re.compile(rf"^\s*(?:<!--\s*agentic:{kind}\s*-->|#\s*agentic:{kind})\s*$")
+             for kind in ("begin", "end")}
+
 _root: Path | None = None
 
 

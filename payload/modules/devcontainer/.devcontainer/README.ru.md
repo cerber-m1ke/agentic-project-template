@@ -7,7 +7,9 @@
 ## Состав
 
 - Debian, git, curl, ripgrep, uv (той же версии, что закреплена в `Toolbox/tb`).
-- Claude Code и Codex CLI, установленные официальными установщиками.
+- Claude Code и Codex CLI, установленные официальными установщиками. Версии — `build.args`
+  в `devcontainer.json` (`CLAUDE_CODE_VERSION`, `CODEX_VERSION`): по умолчанию каналы `stable`/`latest`,
+  для воспроизводимой песочницы закрепите точные версии. `devcontainer.json` принадлежит проекту.
 - Пользователь `dev` без sudo.
 - После создания контейнера выполняется `Toolbox/tb setup --agents claude,codex`.
 

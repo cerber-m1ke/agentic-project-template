@@ -21,6 +21,13 @@ CATALOG = f"{RESOURCES_DIR}/resources.toml"
 RESERVED = {"readme.md", "resources.toml"}
 KINDS = ("git", "folder")
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_SCP_RE = re.compile(r"^[^/\\]+:")          # user@host:path / host:path (not C:\...)
+_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+# Agent settings a resource may carry. An agent started in the project root does not load them
+# (only the resource's AGENTS.md/CLAUDE.md are read, by the rule in AGENTS.md).
+AGENT_CONFIGS = (".claude/settings.json", ".claude/settings.local.json", ".claude/skills",
+                 ".claude/commands", ".claude/agents", ".mcp.json", ".codex/config.toml",
+                 ".codex/hooks.json", ".codex/agents", ".agents/skills")
 
 
 # --- CLI --------------------------------------------------------------------------------
@@ -102,6 +109,21 @@ def _git_state(path: Path) -> tuple[str, str]:
     return branch or "?", f"dirty ({count} change{'s' if count != 1 else ''})" if count else "clean"
 
 
+def is_local_path(url: str) -> bool:
+    """A filesystem path rather than a URL: such a catalog entry only works on this machine."""
+    url = url.strip()
+    if "://" in url:
+        return url.lower().startswith("file://")
+    if _DRIVE_RE.match(url) or url.startswith(("/", "./", "../", "~", "\\")):
+        return True
+    return not _SCP_RE.match(url) and Path(url).expanduser().exists()
+
+
+def agent_configs(path: Path) -> list[str]:
+    """Agent settings inside a resource that an agent started in the project root ignores."""
+    return [name for name in AGENT_CONFIGS if (path / name).exists()]
+
+
 def print_status() -> tuple[list[str], bool]:
     """Print the status table. Returns (missing git resources, catalog readable)."""
     entries, error = load_catalog()
@@ -111,6 +133,8 @@ def print_status() -> tuple[list[str], bool]:
     root = common.project_root()
     missing: list[str] = []
     rows: list[tuple[str, ...]] = []
+    local_urls: list[str] = []
+    foreign_configs: list[str] = []
     for entry in entries:
         name, kind = entry["name"], entry.get("kind", "git")
         path = _resource_dir(name)
@@ -130,6 +154,12 @@ def print_status() -> tuple[list[str], bool]:
             rows.append((name, kind, "cloned", branch, changes))
         else:
             rows.append((name, kind, "present", "", ""))
+        if kind == "git" and is_local_path(str(entry.get("url") or "")):
+            local_urls.append(name)
+        if path.is_dir():
+            configs = agent_configs(path)
+            if configs:
+                foreign_configs.append(f"{RESOURCES_DIR}/{name}/ ({', '.join(configs)})")
 
     if not (root / CATALOG).is_file():
         common.out(f"No catalog: {CATALOG} not found.")
@@ -152,6 +182,14 @@ def print_status() -> tuple[list[str], bool]:
                    f"— add with Toolbox/tb resources add <url> --name <name>")
     if missing:
         common.out(f"Not cloned: {len(missing)} — Toolbox/tb resources clone --all")
+    if local_urls:
+        common.out(f"Local-path url (works only on this machine; use the upstream URL): "
+                   f"{', '.join(local_urls)}")
+    if foreign_configs:
+        common.out("Agent settings inside resources are NOT loaded by an agent started in the project "
+                   "root (hooks, permissions, MCP, skills): " + "; ".join(foreign_configs))
+        common.out("  Move what the project needs into .agents/ (mcp.toml, skills/, hooks/hooks.toml), "
+                   "or start the agent inside the resource for resource-only work.")
     return missing, True
 
 
@@ -209,8 +247,47 @@ def _toml_line(key: str, value: str) -> str:
     return common.dump_toml({key: value}).strip()
 
 
+def _upstream_of_local(path: Path) -> tuple[str | None, str]:
+    """For a local repository given as a resource source: (URL to record, error).
+
+    A bare repository is a remote itself and is kept (machine-specific). A working copy is replaced
+    by its `origin`: the catalog must name the shared upstream, and a fresh clone is made from it
+    (DESIGN §6.2) — so work that exists only in the old copy is reported here."""
+    path = path.expanduser()
+    if not path.is_dir():
+        return None, f"{path} is not a directory"
+    if common.git("rev-parse", "--git-dir", cwd=path).returncode != 0:
+        return None, f"{path} is not a git repository (use --kind folder for a plain folder)"
+    if common.git("rev-parse", "--is-bare-repository", cwd=path).stdout.strip() == "true":
+        common.warn(f"{path} is a local bare repository: the catalog entry works only on this machine")
+        return str(path), ""
+    origin = common.git("remote", "get-url", "origin", cwd=path)
+    if origin.returncode != 0 or not origin.stdout.strip():
+        return None, (f"{path} is a local working copy without `origin`; pass the upstream URL "
+                      "(the catalog is shared, a local path works only on this machine)")
+    upstream = origin.stdout.strip()
+    common.out(f"{path} is a local working copy: recording its origin {upstream} (the old copy is "
+               "left as is; a fresh clone is made from origin)")
+    dirty = [l for l in common.git("status", "--porcelain", cwd=path).stdout.splitlines() if l.strip()]
+    unpushed = [l for l in common.git("log", "--branches", "--not", "--remotes", "--oneline",
+                                      cwd=path).stdout.splitlines() if l.strip()]
+    stashes = [l for l in common.git("stash", "list", cwd=path).stdout.splitlines() if l.strip()]
+    for what, items in (("uncommitted change(s)", dirty), ("unpushed commit(s)", unpushed),
+                        ("stash(es)", stashes)):
+        if items:
+            common.warn(f"{path}: {len(items)} {what} will NOT be in the fresh clone — push or move "
+                        "them first (the old copy keeps them)")
+    return upstream, ""
+
+
 def add(url: str, name: str | None = None, branch: str | None = None, kind: str = "git",
         description: str | None = None, do_clone: bool = False) -> int:
+    if kind == "git" and is_local_path(url):
+        upstream, error = _upstream_of_local(Path(url.removeprefix("file://")))
+        if upstream is None:
+            return common.fail(error)
+        name = name or name_from_url(url)
+        url = upstream
     name = name or name_from_url(url)
     if not _NAME_RE.match(name) or name.lower() in RESERVED:
         return common.fail(f"invalid resource name {name!r} — pass --name "
@@ -248,6 +325,10 @@ def add(url: str, name: str | None = None, branch: str | None = None, kind: str 
             path.unlink()
         return common.fail(f"{CATALOG} would become invalid ({exc}); left unchanged")
     common.out(f"Added {name!r} to {CATALOG}.")
+    if kind == "folder":
+        common.out(f"Note: folder resources are not versioned by the project: {RESOURCES_DIR}/{name}/ "
+                   "exists only on this machine and `tb resources clone` cannot restore it. Record "
+                   "where the content comes from in `url` or in the entity note.")
     if do_clone:
         if kind != "git":
             common.warn(f"{name}: --clone works for git resources only")

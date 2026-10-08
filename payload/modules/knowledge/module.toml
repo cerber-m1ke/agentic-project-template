@@ -2,7 +2,16 @@ name = "knowledge"
 description = "Knowledge/ vault with note templates, tb kb, the librarian subagent and knowledge skills"
 required = true
 default = true
-seeded = []
+# Note templates belong to the project (edited in Obsidian too); template changes arrive as
+# seeded-changed suggestions on update.
+seeded = [
+    "Knowledge/_templates/decision.md",
+    "Knowledge/_templates/entity.md",
+    "Knowledge/_templates/example.md",
+    "Knowledge/_templates/gotcha.md",
+    "Knowledge/_templates/plan.md",
+    "Knowledge/_templates/task.md",
+]
 block = []
 executable = []
 post_install = []

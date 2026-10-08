@@ -273,14 +273,21 @@ def dump_toml(obj: dict[str, Any], multiline: bool = False) -> str:
     return f"# {GENERATED_NOTE}\n\n" + tomli_w.dumps(obj, multiline_strings=multiline)
 
 
+# POSIX sh: find the project root upwards from the cwd (the folder with the lock) and run its tb
+# with the remaining arguments; outside a project it does nothing. $0 is "tb".
+TB_FIND = ("sh -c 'd=$PWD; while [ ! -f \"$d/.agents/agentic.lock\" ]; do "
+           "[ \"$d\" = / ] && exit 0; d=$(dirname \"$d\"); done; "
+           "exec sh \"$d/Toolbox/tb\" \"$@\"' tb")
+
+
 def hook_command(template: str, hook: Hook, ctx: Context) -> str:
-    """Fill a command template: {name}, {agent}, {tb} (absolute, shell-quoted Toolbox/tb),
-    {tb_cmd} (relative, unquoted `Toolbox\\tb.cmd`: valid in both cmd and PowerShell when the
-    hook runs from the project root; a quoted absolute path is a parse error in PowerShell).
-    Absolute paths are fine: generated files are per machine and gitignored."""
+    """Fill a command template: {name}, {agent}, {tb_find} (portable: finds the project root from
+    the cwd), {tb} (absolute, shell-quoted Toolbox/tb), {tb_cmd} (relative, unquoted
+    `Toolbox\\tb.cmd`: valid in both cmd and PowerShell when the hook runs from the project root;
+    a quoted absolute path is a parse error in PowerShell)."""
     tb = shlex.quote((ctx.root / "Toolbox" / "tb").as_posix())
     return (template.replace("{name}", hook.name).replace("{agent}", ctx.agent)
-            .replace("{tb_cmd}", "Toolbox\\tb.cmd").replace("{tb}", tb))
+            .replace("{tb_find}", TB_FIND).replace("{tb_cmd}", "Toolbox\\tb.cmd").replace("{tb}", tb))
 
 
 def hooks_by_event(ctx: Context) -> dict[str, list[Hook]]:

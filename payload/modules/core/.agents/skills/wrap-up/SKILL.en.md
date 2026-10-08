@@ -22,16 +22,16 @@ update it instead of creating a duplicate.
    - `status`: `active`, `blocked` (record the reason) or `done`; the `resources` field — affected resources;
    - `verified` — today's date.
    If the work happened without a task but will continue, suggest creating one:
-   `Toolbox/tb kb new task <slug> --title "…"`.
+   `Toolbox/tb kb new task <slug> --title "…" --description "…"`.
 3. **Task finished (`done`).** Distribute the "Takeaways for Knowledge" across Decisions, Gotchas,
    Entities and Examples, and suggest that the human delete the task file — it stays in git history.
-4. **Postponed items and ideas** → Plans: `Toolbox/tb kb new plan <slug> --title "…"` (status `idea`).
-5. **Pitfalls** → Gotchas: `Toolbox/tb kb new gotcha <slug> --title "…"` — symptom, cause, workaround,
+4. **Postponed items and ideas** → Plans: `Toolbox/tb kb new plan <slug> --title "…" --description "…"` (status `idea`).
+5. **Pitfalls** → Gotchas: `Toolbox/tb kb new gotcha <slug> --title "…" --description "…"` — symptom, cause, workaround,
    how to check it still applies; versions go in `applies_to` (`node@22`).
-6. **Decisions that will outlive the task** → propose an ADR: `Toolbox/tb kb new decision <slug> --title "…"`
+6. **Decisions that will outlive the task** → propose an ADR: `Toolbox/tb kb new decision <slug> --title "…" --description "…"`
    with status `proposed`. Move it to `accepted` only with the human's consent.
 7. **Entities.** Learned something new about a service, module or data store (relations, invariants,
-   owners) — update its card in Entities or create one: `Toolbox/tb kb new entity <slug> --title "…"`.
+   owners) — update its card in Entities or create one: `Toolbox/tb kb new entity <slug> --title "…" --description "…"`.
 8. **Re-verified notes.** If you checked a note against Resources during the session and it is correct,
    set `verified` to today's date. Fix an outdated note or change its status (`resolved`, `outdated`,
    `deprecated`, `superseded` with `superseded_by`).

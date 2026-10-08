@@ -1,3 +1,5 @@
+# The block between the agentic markers is managed by the template and replaced on update.
+# agentic:begin
 # Line endings: LF everywhere, CRLF for Windows batch files (cmd.exe needs it).
 * text=auto eol=lf
 *.cmd text eol=crlf
@@ -25,3 +27,6 @@
 *.docx binary
 *.xlsx binary
 *.pptx binary
+# agentic:end
+
+# Project-specific rules go below this line (e.g. Git LFS: *.psd filter=lfs diff=lfs merge=lfs -text).

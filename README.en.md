@@ -53,7 +53,7 @@ installed globally and no administrator rights are required. macOS, Linux and Wi
 ## Quick start
 
 ```sh
-git clone <template-url> my-project
+git clone --branch v<version> <template-url> my-project   # latest release; without --branch: development
 cd my-project
 ```
 
@@ -124,7 +124,7 @@ The template URL is saved in `.agents/agentic.lock` — the project is updated f
 │   ├── agentic/              # template tools (managed)
 │   └── …                     # project tools
 ├── Runtime/                  # not in git
-└── .claude/  .codex/  …      # generated adapters, not in git
+└── .claude/  .codex/  CLAUDE.md  …   # generated adapters, not in git
 ```
 
 **Toolbox** is the project's toolbox and, at the same time, a layer of independence from the host system.
@@ -195,17 +195,21 @@ the plan, the changes from `CHANGELOG.md`, conflicts and migrations; after you c
 the `agentic/update-<version>` branch, checks the project and commits. Merging happens after your OK;
 rolling back is done with git.
 
+The same mechanism changes the project composition: add or remove a module, switch the language or the
+profile (`--add-module`, `--remove-module`, `--language`, `--profile`; without a new release — from a copy
+of the installed version, `tb update fetch --ref v<version>`).
+
 ### File ownership
 
 | Class | Owner | What an update does |
 |---|---|---|
 | `managed` | template | Replaces the file if it has not changed locally; otherwise it is a conflict for the human to resolve |
 | `seeded` | project (created from the template once) | Leaves it alone; may suggest changes |
-| `block` | mixed | Updates only the block between the `agentic:begin` and `agentic:end` markers (e.g. in `AGENTS.md`) |
+| `block` | mixed | Updates only the block between the `agentic:begin` and `agentic:end` markers (`AGENTS.md`, `.gitignore`, `.gitattributes`, `.ignore`) |
 | everything else | project | Leaves it alone |
 
 Classes and hashes are recorded in `.agents/agentic.lock` — the basis for the three-way comparison during
-an update.
+an update. The note templates in `Knowledge/_templates/` are `seeded`: adapt them to the project.
 
 ## Agents
 
@@ -233,13 +237,18 @@ update. An open-source or Chinese model running inside an already supported agen
 
 The template ships in Russian (the default) and English. The language is chosen at init, and the project
 gets only that language: translation duplicates stay in the template and do not bloat the Agent's context.
-`tb` messages are always in English.
+`tb` messages are always in English. The language can be switched later by an update with `--language`:
+the template's files are translated, the project's own files are not.
 
 ## Versions
 
 A template release is a git tag `vX.Y.Z` (semver) with a section in [CHANGELOG.md](CHANGELOG.md), which
 must describe any migrations. An update takes the latest release, not the current state of the branch.
 A project deployed from a fork is updated from that fork.
+
+Between releases `setup/VERSION` holds the next version with the `-dev` suffix (e.g. `0.2.0-dev`). Init
+warns when a project is deployed from such a state, and an update offers release `0.2.0` as soon as it is
+out. Use a release tag for real projects.
 
 ## Documentation
 

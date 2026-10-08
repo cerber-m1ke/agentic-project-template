@@ -12,6 +12,10 @@ Runs from <project>/Runtime/update/<v>/ (see `tb update fetch` and setup/UPDATE.
     Toolbox/tb run Runtime/update/<v>/setup/update.py apply --project . --yes
         [--take-template PATH]… [--keep-local PATH]… [--no-branch]
 
+The project composition can change in the same run (plan, diff and apply take the same options):
+    --language ru|en  --profile NAME  --add-module NAME…  --remove-module NAME…
+To change it without a new release, fetch the installed one: Toolbox/tb update fetch --ref v<installed>.
+
 Three-way comparison per file: base = hash in .agents/agentic.lock, local = project file,
 theirs = this template rendered for the project's language/profile/modules.
 """
@@ -68,6 +72,7 @@ class State:
     modules: list[str]
     missing_modules: list[str]
     new_modules: list[str]
+    changes: list[str]            # composition changes requested on the command line
     entries: dict[str, il.Entry]
     items: list[Item]
     migrations: list[tuple[str, Path]]
@@ -144,8 +149,22 @@ def classify(project: Path, path: str, lock_entry: dict | None, entry: il.Entry 
     return item("conflict", "changed locally and in template", local=local)
 
 
-def load_state(project_arg: str) -> State:
-    project = Path(project_arg).resolve()
+def composition_args(args: argparse.Namespace) -> list[str]:
+    """The composition options as command-line words (repeated in printed hints)."""
+    words: list[str] = []
+    if args.language:
+        words += ["--language", args.language]
+    if args.profile:
+        words += ["--profile", args.profile]
+    for name in args.add_module:
+        words += ["--add-module", name]
+    for name in args.remove_module:
+        words += ["--remove-module", name]
+    return words
+
+
+def load_state(args: argparse.Namespace) -> State:
+    project = Path(args.project).resolve()
     lock = il.read_lock(project)
     if lock is None:
         raise il.InstallerError(f"{project / il.LOCK_PATH} not found: not an agentic project")
@@ -155,11 +174,33 @@ def load_state(project_arg: str) -> State:
     old_version = tpl.get("version", "0.0.0")
     il.parse_version(old_version)
     new_version = il.read_version(TEMPLATE_ROOT)
-    language, profile = prj.get("language", "ru"), prj.get("profile", "software")
+    old_language, old_profile = prj.get("language", "ru"), prj.get("profile", "software")
+    language, profile = args.language or old_language, args.profile or old_profile
     if language not in il.LANGS:
-        raise il.InstallerError(f"lock: unsupported language '{language}'")
-    modules = list(prj.get("modules", []))
+        raise il.InstallerError(f"unsupported language '{language}' (available: {', '.join(il.LANGS)})")
+    if args.profile and args.profile not in il.list_profiles(TEMPLATE_ROOT):
+        raise il.InstallerError(f"unknown profile '{args.profile}' "
+                                f"(available: {', '.join(il.list_profiles(TEMPLATE_ROOT))})")
     all_modules = il.load_modules(TEMPLATE_ROOT)
+    installed = list(prj.get("modules", []))
+    changes: list[str] = []
+    if language != old_language:
+        changes.append(f"language {old_language} -> {language}")
+    if profile != old_profile:
+        changes.append(f"profile {old_profile} -> {profile}")
+    for name in args.add_module:
+        if name not in all_modules:
+            raise il.InstallerError(f"unknown module '{name}' (available: {', '.join(all_modules)})")
+        if name in installed:
+            raise il.InstallerError(f"module '{name}' is already installed")
+        changes.append(f"add module {name}")
+    for name in args.remove_module:
+        if name not in installed:
+            raise il.InstallerError(f"module '{name}' is not installed")
+        if name in all_modules and all_modules[name].required:
+            raise il.InstallerError(f"module '{name}' is required and cannot be removed")
+        changes.append(f"remove module {name}")
+    modules = [m for m in installed if m not in args.remove_module] + list(dict.fromkeys(args.add_module))
     present = [m for m in modules if m in all_modules]
     missing = [m for m in modules if m not in all_modules]
     notes: list[str] = []
@@ -168,7 +209,8 @@ def load_state(project_arg: str) -> State:
     rules_missing = not (TEMPLATE_ROOT / rules_file).is_file()
     if profile in il.list_profiles(TEMPLATE_ROOT):
         prof = il.load_profile(TEMPLATE_ROOT, profile)
-        new_modules = [m for m in il.available_profile_modules(prof, all_modules) if m not in modules]
+        new_modules = [m for m in il.available_profile_modules(prof, all_modules)
+                       if m not in modules and m not in args.remove_module]
     else:
         notes.append(f"profile '{profile}' no longer exists in the template")
     if missing:
@@ -198,7 +240,7 @@ def load_state(project_arg: str) -> State:
     if il.parse_version(new_version) < il.parse_version(old_version):
         notes.append(f"template v{new_version} is OLDER than the project (v{old_version})")
     return State(project, lock, old_version, new_version, tpl.get("source", "") or source, commit,
-                 language, profile, modules, missing, new_modules, entries, items, migrations, notes)
+                 language, profile, present, missing, new_modules, changes, entries, items, migrations, notes)
 
 
 def plan_json(state: State) -> dict:
@@ -212,6 +254,7 @@ def plan_json(state: State) -> dict:
         "language": state.language,
         "profile": state.profile,
         "modules": state.modules,
+        "changes": state.changes,
         "summary": summary,
         "files": [i.as_json() for i in state.items],
         "migrations": [p.relative_to(TEMPLATE_ROOT).as_posix() for _v, p in state.migrations],
@@ -236,7 +279,7 @@ def script_hint(state: State) -> str:
 # --- commands ------------------------------------------------------------------------------------
 
 def cmd_plan(args: argparse.Namespace) -> int:
-    state = load_state(args.project)
+    state = load_state(args)
     data = plan_json(state)
     save_plan(state, data)
     if args.json:
@@ -244,6 +287,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
         return 0
     commit = f", template commit {state.commit[:12]}" if state.commit else ""
     print(f"Update plan: v{state.old_version} -> v{state.new_version}{commit}")
+    for change in state.changes:
+        print(f"composition: {change}")
     for status in STATUS_ORDER[:-1]:
         items = [i for i in state.items if i.status == status]
         if not items:
@@ -260,14 +305,15 @@ def cmd_plan(args: argparse.Namespace) -> int:
         print("Migrations: none")
     if state.new_modules:
         print(f"Not installed modules of profile '{state.profile}': {', '.join(state.new_modules)} "
-              "(adding modules is not supported by update)")
+              "(add with --add-module NAME)")
     for note in state.notes:
         print(f"note: {note}")
     script = script_hint(state)
+    extra = "".join(f" {w}" for w in composition_args(args))
     print(f"Saved {PLAN_PATH}")
     if any(i.status in ("conflict", "seeded-changed") for i in state.items):
-        print(f"Review: Toolbox/tb run {script} diff --project . <path>")
-    print(f"Apply:  Toolbox/tb run {script} apply --project . --yes "
+        print(f"Review: Toolbox/tb run {script} diff --project .{extra} <path>")
+    print(f"Apply:  Toolbox/tb run {script} apply --project .{extra} --yes "
           "[--take-template PATH]… [--keep-local PATH]…")
     return 0
 
@@ -293,7 +339,7 @@ def target_text(item: Item, local: str | None) -> str | None:
 
 
 def cmd_diff(args: argparse.Namespace) -> int:
-    state = load_state(args.project)
+    state = load_state(args)
     by_path = {i.path: i for i in state.items}
     rc = 0
     for raw in args.paths:
@@ -342,7 +388,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     if not args.yes:
         print("error: apply changes the project; review the plan, then re-run with --yes", file=sys.stderr)
         return 2
-    state = load_state(args.project)
+    state = load_state(args)
     project = state.project
     by_path = {i.path: i for i in state.items}
     take = [il.posix(p) for p in args.take_template]
@@ -357,6 +403,12 @@ def cmd_apply(args: argparse.Namespace) -> int:
         if p not in by_path or by_path[p].status not in ("conflict", "local-modified"):
             status = by_path[p].status if p in by_path else "not in plan"
             problems.append(f"--take-template {p}: only for conflict/local-modified files (status: {status})")
+        elif by_path[p].local == il.NO_MARKERS and by_path[p].lock_entry is not None:
+            # The old block text is still in the file, just unmarked: appending the new block would
+            # duplicate it. Only a person can tell which lines were the template's.
+            problems.append(f"--take-template {p}: the file lost its agentic:begin/end markers; put the "
+                            "marker lines back around the template part (or delete that part), commit, "
+                            "and re-run the plan")
     for p in keep:
         if p not in by_path or by_path[p].status != "conflict":
             status = by_path[p].status if p in by_path else "not in plan"
@@ -435,8 +487,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
     tpl = state.lock.get("template", {})
     source = tpl.get("source") or state.source
-    il.write_lock(project, il.make_lock(source, state.new_version, state.commit,
-                                        dict(state.lock.get("project", {})), files))
+    project_record = {**state.lock.get("project", {}), "language": state.language,
+                      "profile": state.profile, "modules": state.modules}
+    il.write_lock(project, il.make_lock(source, state.new_version, state.commit, project_record, files))
 
     staged: list[str] = []
     existing = [p for p in executables if (project / p).is_file()]
@@ -450,6 +503,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
     where = f"on branch {branch}" if branch else "in the current branch"
     print(f"Applied update v{state.old_version} -> v{state.new_version} {where} (not committed).")
+    for change in state.changes:
+        print(f"composition: {change}")
     for key, paths in done.items():
         if paths:
             print(f"{key} ({len(paths)}): {', '.join(paths)}")
@@ -468,6 +523,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
     tb = "Toolbox\\tb.cmd" if os.name == "nt" else "Toolbox/tb"
     print("Next steps:")
     print(f"  {tb} kb lint")
+    if any(c.startswith(("add module", "remove module")) for c in state.changes):
+        print(f"  {tb} setup")
     print(f"  {tb} agents link")
     print(f"  {tb} agents doctor")
     if staged:
@@ -483,19 +540,28 @@ def fail(msg: str) -> int:
     return 1
 
 
+def add_common(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--project", required=True, help="project root")
+    p.add_argument("--language", choices=il.LANGS, help="switch the project language (managed files)")
+    p.add_argument("--profile", help="switch the profile (its rules in the AGENTS.md block)")
+    p.add_argument("--add-module", action="append", default=[], metavar="NAME", help="install a module")
+    p.add_argument("--remove-module", action="append", default=[], metavar="NAME",
+                   help="remove a non-required module (its unchanged files are deleted)")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="update.py", description="Update an agentic project from this template.")
     sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
     p = sub.add_parser("plan", help="classify every template file; saves Runtime/update/plan.json")
-    p.add_argument("--project", required=True, help="project root")
+    add_common(p)
     p.add_argument("--json", action="store_true", help="print the plan as JSON")
     p.set_defaults(func=cmd_plan)
     d = sub.add_parser("diff", help="unified diff: local file vs new template version (block-aware)")
-    d.add_argument("--project", required=True, help="project root")
+    add_common(d)
     d.add_argument("paths", nargs="+", metavar="path", help="file path relative to the project root")
     d.set_defaults(func=cmd_diff)
     a = sub.add_parser("apply", help="apply the plan on a new branch (does not commit)")
-    a.add_argument("--project", required=True, help="project root")
+    add_common(a)
     a.add_argument("--yes", action="store_true", help="required: confirm applying")
     a.add_argument("--take-template", action="append", default=[], metavar="PATH",
                    help="resolve a conflict (or reset a local-modified file) with the template version")

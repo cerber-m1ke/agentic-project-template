@@ -5,8 +5,14 @@
 name = "claude"
 title = "Claude Code"
 tier = 3                       # 0 AGENTS.md only, 1 + native skills, 2 + subagents, 3 + hooks
-instructions = "native"        # reads AGENTS.md itself while there is no CLAUDE.md
-outputs = ["/.claude/", "/.mcp.json"]   # generated paths; must be in the project .gitignore block
+outputs = ["/.claude/", "/.mcp.json", "/CLAUDE.md"]   # generated paths; must be in the project .gitignore block
+
+[instructions]
+# CLAUDE.md that imports AGENTS.md. Recent Claude Code versions read AGENTS.md themselves when there
+# is no CLAUDE.md, older ones only read CLAUDE.md: the import works with both, so no version is
+# left without the project instructions. Claude-only notes: .claude/CLAUDE.md or CLAUDE.local.md.
+target = "CLAUDE.md"
+import = "AGENTS.md"
 
 [skills]
 mode = "link"                  # native | link | none
@@ -29,7 +35,12 @@ events = { session-start = "SessionStart", prompt-submit = "UserPromptSubmit", b
 target = ".claude/settings.json"
 # Read-only tb commands that need no confirmation.
 allow = [
-    "Bash(Toolbox/tb kb *)",
+    "Bash(Toolbox/tb kb search *)",
+    "Bash(Toolbox/tb kb show *)",
+    "Bash(Toolbox/tb kb related *)",
+    "Bash(Toolbox/tb kb index*)",
+    "Bash(Toolbox/tb kb lint*)",
+    "Bash(Toolbox/tb kb stale*)",
     "Bash(Toolbox/tb version)",
     "Bash(Toolbox/tb resources status)",
     "Bash(Toolbox/tb agents doctor)",

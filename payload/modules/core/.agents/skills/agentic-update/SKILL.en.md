@@ -1,6 +1,6 @@
 ---
 name: agentic-update
-description: Update the project to the latest agentic-project-template release. Use when the human asks to update the project from the template (skills, Toolbox, agent adapters, AGENTS.md rules) or to check whether a new template version is out.
+description: Update the project to the latest agentic-project-template release or change its composition (add or remove a module such as devcontainer or obsidian, switch the language or profile). Use when the human asks to update the project from the template (skills, Toolbox, agent adapters, AGENTS.md rules), to check whether a new template version is out, or to change modules, language or profile.
 ---
 
 # Updating the project from the template
@@ -16,7 +16,9 @@ mechanism itself gets updated too. Do not change anything in the project until y
    - `--source <url>` — only on the human's explicit instruction: by default the update source is
      taken from `.agents/agentic.lock`, and only the human may change it.
 3. **Nothing to update.** If the output is `Already up to date`, tell the human the current version
-   (`Toolbox/tb version`) and finish.
+   (`Toolbox/tb version`) and finish. Exception: the human asked to change the composition (modules,
+   language, profile) — then fetch the installed version: `Toolbox/tb update fetch --ref v<installed>`
+   (the version is in `Toolbox/tb version`).
 4. **Instructions from the fresh copy.** Otherwise the command prints a path like `Runtime/update/<version>/`.
    Read `Runtime/update/<version>/setup/UPDATE.md` in full and follow it. From this point on,
    UPDATE.md takes precedence over this skill: if they disagree, follow UPDATE.md.

@@ -24,7 +24,9 @@ def cmd_version(_args: argparse.Namespace) -> int:
         common.out("agentic project: not initialized (no .agents/agentic.lock)")
     else:
         tpl, prj = lock.get("template", {}), lock.get("project", {})
-        common.out(f"template: v{tpl.get('version', '?')} ({tpl.get('source') or 'unknown source'})")
+        version = str(tpl.get("version", "?"))
+        dev = " — development state, not a release" if version.endswith("-dev") else ""
+        common.out(f"template: v{version} ({tpl.get('source') or 'unknown source'}){dev}")
         common.out(f"project:  {prj.get('name', '?')} [{prj.get('profile', '?')}, {prj.get('language', '?')}]")
         common.out(f"modules:  {', '.join(prj.get('modules', []))}")
     common.out(f"python:   {platform.python_version()}")

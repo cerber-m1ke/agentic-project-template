@@ -5,4 +5,4 @@ default = true
 seeded = []
 block = []
 executable = []
-post_install = [["obsidian", "setup"]]
+post_install = []  # Toolbox/tb setup configures the vault when this module is installed

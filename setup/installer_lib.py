@@ -33,8 +33,13 @@ MIGRATIONS_DIR = "setup/migrations"
 VERSION_FILE = "setup/VERSION"
 
 LANG_RE = re.compile(r"^(?P<base>.+)\.(?P<lang>ru|en)(?P<ext>\.[A-Za-z0-9]+)?$")
-VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+# Release "X.Y.Z" or development state "X.Y.Z-dev" (the next release, not published yet).
+VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(-dev)?$")
 MIGRATION_RE = re.compile(r"^(?P<version>\d+\.\d+\.\d+)_(?P<slug>[A-Za-z0-9][A-Za-z0-9_-]*)\.py$")
+# A marker is a whole line: `<!-- agentic:begin -->` (Markdown) or `# agentic:begin` (git/ignore files).
+# Prose that merely mentions the marker words never counts.
+MARKER_RE = {kind: re.compile(rf"^\s*(?:<!--\s*agentic:{kind}\s*-->|#\s*agentic:{kind})\s*$")
+             for kind in ("begin", "end")}
 PLACEHOLDER_RE = re.compile(r"\{\{agentic\.([A-Za-z0-9_]+)\}\}")
 PLACEHOLDER_KEYS = ("project_name", "language", "profile", "date", "profile_rules")
 SKIP_NAMES = frozenset({"__pycache__", ".DS_Store", "Thumbs.db", "desktop.ini"})
@@ -60,11 +65,16 @@ def load_toml(path: Path) -> dict:
         raise InstallerError(f"{path}: invalid TOML: {exc}") from exc
 
 
-def parse_version(text: str) -> tuple[int, int, int]:
+def parse_version(text: str) -> tuple[int, int, int, int]:
+    """(major, minor, patch, release): X.Y.Z-dev sorts before X.Y.Z (release = 0 vs 1)."""
     m = VERSION_RE.match(text.strip())
     if not m:
-        raise InstallerError(f"invalid version '{text.strip()}' (expected X.Y.Z)")
-    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+        raise InstallerError(f"invalid version '{text.strip()}' (expected X.Y.Z or X.Y.Z-dev)")
+    return int(m.group(1)), int(m.group(2)), int(m.group(3)), 0 if m.group(4) else 1
+
+
+def is_release(version: str) -> bool:
+    return parse_version(version)[3] == 1
 
 
 def read_version(template_root: Path) -> str:
@@ -122,10 +132,10 @@ def _lines(text: str) -> list[str]:
 def split_block(text: str) -> tuple[str, str, str] | None:
     """Split into (head incl. begin marker line, block, tail from end marker line); None without markers."""
     lines = _lines(normalize_newlines(text))
-    begin = next((i for i, line in enumerate(lines) if "agentic:begin" in line), None)
+    begin = next((i for i, line in enumerate(lines) if MARKER_RE["begin"].match(line)), None)
     if begin is None:
         return None
-    end = next((j for j in range(begin + 1, len(lines)) if "agentic:end" in lines[j]), None)
+    end = next((j for j in range(begin + 1, len(lines)) if MARKER_RE["end"].match(lines[j])), None)
     if end is None:
         return None
     return "".join(lines[: begin + 1]), "".join(lines[begin + 1 : end]), "".join(lines[end:])
@@ -577,7 +587,11 @@ def git_identity_problem(cwd: Path) -> str | None:
 # --- migrations ----------------------------------------------------------------------------
 
 def list_migrations(template_root: Path, old: str, new: str) -> list[tuple[str, Path]]:
-    """Migration scripts with version in (old, new], ordered by version then name."""
+    """Migration scripts to run when going from `old` to `new`, ordered by version then name.
+
+    A migration named X.Y.Z runs when old < X.Y.Z and new >= X.Y.Z-dev: a development state of
+    the release already carries it, and a project initialized from a development state of X.Y.Z
+    gets it again on the way to the release (migrations are idempotent)."""
     base = template_root / MIGRATIONS_DIR
     if not base.is_dir():
         return []
@@ -588,7 +602,7 @@ def list_migrations(template_root: Path, old: str, new: str) -> list[tuple[str, 
         if not m:
             raise InstallerError(f"{MIGRATIONS_DIR}/{path.name}: bad migration name (expected <x.y.z>_<slug>.py)")
         version = parse_version(m.group("version"))
-        if low < version <= high:
+        if low < version and version[:3] + (0,) <= high:
             found.append((version, path.name, m.group("version"), path))
     return [(v, p) for _ver, _name, v, p in sorted(found)]
 

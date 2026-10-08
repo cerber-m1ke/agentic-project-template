@@ -20,14 +20,14 @@
 | `tb setup [--agents a,b] [--clone-missing]` | Настройка машины: uv, адаптеры, git, Obsidian, Ресурсы |
 | `tb kb search <запрос> [--type T] [--status S] [--resource R]` | Поиск в Знаниях |
 | `tb kb show <путь\|slug>`, `tb kb related <путь\|slug>` | Заметка целиком; ссылки и обратные ссылки |
-| `tb kb new <type> <slug> [--title T] [--folder]` | Новая заметка из `Knowledge/_templates/` |
-| `tb kb index`, `tb kb lint`, `tb kb stale` | Индекс; проверка Знаний и `AGENTS.md`; кандидаты на перепроверку |
+| `tb kb new <type> <slug> [--title T] [--description D] [--folder]` | Новая заметка из `Knowledge/_templates/` |
+| `tb kb index [--base DIR]`, `tb kb lint [--staged]`, `tb kb stale` | Индекс; проверка Знаний и `AGENTS.md` (`--staged` — то, что войдёт в коммит); кандидаты на перепроверку |
 | `tb secrets scan [--staged] [пути…]` | Поиск секретов |
 | `tb agents list\|link\|unlink\|doctor` | Адаптеры агентов на этой машине |
 | `tb resources status\|clone\|add` | Ресурсы: состояние, клонирование, добавление в каталог |
 | `tb obsidian setup` | Конфигурация хранилища Obsidian |
-| `tb update fetch` | Скачать свежий релиз шаблона в `Runtime/update/` (дальше — skill `agentic-update`) |
-| `tb hook <name> [--agent A]` | Обработчики хуков; вызываются агентами, не вручную |
+| `tb update fetch [--ref vX.Y.Z]` | Скачать свежий (или указанный) релиз шаблона в `Runtime/update/` (дальше — skill `agentic-update`) |
+| `tb hook <name> [--agent A]` | Обработчики хуков; вызываются агентами, не вручную. Никогда не блокируют агента и ничего не скачивают |
 | `tb run <script> [аргументы…]` | Запустить скрипт через uv |
 
 ## Как добавить инструмент проекта

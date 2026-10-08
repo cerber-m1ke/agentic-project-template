@@ -71,7 +71,7 @@ A task with status `done` is always listed: its takeaways have not been harveste
 | `Toolbox/tb kb search <query> [--type T] [--status S] [--resource R]` | Search titles, descriptions, aliases, tags and text |
 | `Toolbox/tb kb show <path\|slug>` | The whole note |
 | `Toolbox/tb kb related <path\|slug>` | Links and backlinks |
-| `Toolbox/tb kb new <type> <slug> --title "…"` | New note from a template; `--folder` — a task as a folder |
+| `Toolbox/tb kb new <type> <slug> --title "…" --description "…"` | New note from a template; `--folder` — a task as a folder |
 | `Toolbox/tb kb index` | Index grouped by type |
 | `Toolbox/tb kb lint` | Frontmatter, links, file names, `AGENTS.md` budget |
 | `Toolbox/tb kb stale` | Candidates for re-checking |
@@ -81,7 +81,8 @@ On Windows (PowerShell): `Toolbox\tb.cmd kb …`.
 ## Templates
 
 `_templates/` holds note templates shared by `Toolbox/tb kb new` and Obsidian. The placeholders `{{title}}` and `{{date}}`
-are filled in when a note is created. Templates are not counted as notes.
+are filled in when a note is created. Templates are not counted as notes. The templates belong to the
+project: adapt them — a template update only suggests its changes.
 
 ## Obsidian
 

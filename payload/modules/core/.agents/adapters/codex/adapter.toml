@@ -6,9 +6,11 @@
 name = "codex"
 title = "Codex CLI"
 tier = 3                       # 0 AGENTS.md only, 1 + native skills, 2 + subagents, 3 + hooks
-instructions = "native"        # reads AGENTS.md itself
 outputs = ["/.codex/"]         # generated paths; must be in the project .gitignore block
 link_hint = "Codex reads .codex/ only in trusted projects; approve new hooks once in /hooks."
+
+[instructions]
+mode = "native"                # reads AGENTS.md itself: nothing to generate
 
 [skills]
 mode = "native"                # Codex scans <repo>/.agents/skills itself: no links
@@ -19,16 +21,20 @@ granularity = "none"
 target = ".codex/agents"       # <name>.toml: name, description, developer_instructions
 # No model names (they change often): the tier sets the reasoning effort only.
 reasoning_effort = { fast = "low", balanced = "medium", strong = "high" }
-# Codex has no tools list: the tools tier maps to a sandbox mode.
+# Codex has no tools list: the tools tier maps to a sandbox mode. `shell` gets workspace-write
+# because tb itself writes its cache in Runtime/ (a read-only sandbox would break `tb kb search`);
+# read-only subagents such as the librarian keep to reading by their instructions.
 sandbox = { read-only = "read-only", shell = "workspace-write", edit = "workspace-write" }
 
 [hooks]
 target = ".codex/hooks.json"
-# {name} = hook name; {tb} = absolute path of Toolbox/tb, {tb_cmd} = Toolbox\tb.cmd
-# (relative and unquoted: valid in both cmd and PowerShell when cwd is the project root). Codex runs hooks from the session cwd and has no
-# project-dir variable, so the path is absolute: after moving the project folder, rerun
-# `Toolbox/tb agents link`. New hooks must be approved once by the user in /hooks.
-command = "{tb} hook {name} --agent codex"
+# {name} = hook name. Codex runs hooks from the session cwd and has no project-dir variable:
+# {tb_find} = `sh -c` that walks up from the cwd to the folder with .agents/agentic.lock and runs
+# its Toolbox/tb — no absolute path, so the file stays valid after moving the project, inside a
+# dev container and from a subfolder such as Resources/<name>. {tb} = absolute path of Toolbox/tb.
+# {tb_cmd} = Toolbox\tb.cmd (relative and unquoted: valid in both cmd and PowerShell, but only
+# when the session starts in the project root). New hooks must be approved once in /hooks.
+command = "{tb_find} hook {name} --agent codex"
 command_windows = "{tb_cmd} hook {name} --agent codex"
 timeout = 30
 events = { session-start = "SessionStart", prompt-submit = "UserPromptSubmit", before-tool = "PreToolUse", after-tool = "PostToolUse", stop = "Stop" }

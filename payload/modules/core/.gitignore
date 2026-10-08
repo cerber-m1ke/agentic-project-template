@@ -12,26 +12,32 @@
 /.claude/
 /.mcp.json
 /.codex/
+/CLAUDE.md
 
 # Per-machine settings
 /.agents/local.toml
 
-# Obsidian workspace state
+# Obsidian workspace state and trash
 /Knowledge/.obsidian/
+/Knowledge/.trash/
 
-# Secrets
+# Secrets (example files stay committed)
 .env
 .env.*
+!.env.example
+!.env.sample
+!.env.template
 
 # Python bytecode
 __pycache__/
 
-# OS and editor files
+# OS files
 .DS_Store
 Thumbs.db
 ._*
-.idea/
-.vscode/
 # agentic:end
 
 # Project-specific rules go below this line.
+# Editor settings (delete these lines to commit shared editor settings):
+.idea/
+.vscode/

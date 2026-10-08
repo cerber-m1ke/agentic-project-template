@@ -10,7 +10,12 @@ rem Runtime\tools\uv\uv.exe; else download the pinned uv release with curl.exe, 
 rem SHA256 with certutil against the values below and unpack it with tar.exe (all three are
 rem built into Windows 10 1803 and later). Python and caches go to Runtime\ as well.
 rem
-rem Environment: TB_ROOT (project root override), AGENTIC_UV_DOWNLOAD_URL (base URL of uv
+rem "hook ..." (agent hooks) never blocks the agent: exit code 0 whatever happens, no downloads of
+rem uv, Python or packages (offline; does nothing until "tb setup" prepared Runtime\).
+rem
+rem Environment: TB_ROOT (root override for the template's own tb; must contain
+rem .agents\agentic.lock or setup\VERSION; ignored by the tb of an initialized project),
+rem AGENTIC_UV_DOWNLOAD_URL (base URL of uv
 rem releases; the asset is fetched from BASE/VERSION/ASSET), HTTPS_PROXY. UV_* variables that
 rem are already set are respected. Exported to tools: AGENTIC_ROOT, PYTHONUTF8=1.
 rem
@@ -34,9 +39,15 @@ set "TB_SHA_ARM64=13294e232ececbe709c06b74e6ced06f2a225ea5591476685362f22be56a50
 rem --- Paths -------------------------------------------------------------------------------
 set "TB_DIR=%~dp0"
 set "TB_DIR=%TB_DIR:~0,-1%"
-for %%I in ("%TB_DIR%\..") do set "ROOT=%%~fI"
+for %%I in ("%TB_DIR%\..") do set "TB_HOME=%%~fI"
+set "ROOT=%TB_HOME%"
 if defined TB_ROOT for %%I in ("%TB_ROOT%\.") do set "ROOT=%%~fI"
 if not exist "%ROOT%\" (>&2 echo error: TB_ROOT is not a directory: "%TB_ROOT%"& exit /b 1)
+rem An inherited TB_ROOT (e.g. from template development) must not redirect a project's tb.
+if /i not "%ROOT%"=="%TB_HOME%" if exist "%TB_HOME%\.agents\agentic.lock" (>&2 echo tb: TB_ROOT ignored: this Toolbox belongs to the project "%TB_HOME%"& set "ROOT=%TB_HOME%")
+if defined TB_ROOT if not exist "%ROOT%\.agents\agentic.lock" if not exist "%ROOT%\setup\VERSION" (>&2 echo error: TB_ROOT "%TB_ROOT%" is neither an agentic project nor the template: no .agents\agentic.lock or setup\VERSION& exit /b 1)
+set "TB_HOOK="
+if "%~1"=="hook" set "TB_HOOK=1"
 
 rem --- Environment -------------------------------------------------------------------------
 set "AGENTIC_ROOT=%ROOT%"
@@ -89,6 +100,7 @@ if not exist "%TB_CURL%" set "TB_CURL=curl.exe"
 set "TB_TAR=%SystemRoot%\System32\tar.exe"
 if not exist "%TB_TAR%" set "TB_TAR=tar.exe"
 
+if not defined TB_UV if defined TB_HOOK (>&2 echo tb: hook skipped: uv is not installed in Runtime yet, run Toolbox\tb.cmd setup& exit /b 0)
 if not defined TB_UV if not defined TB_ASSET (>&2 echo error: no pinned uv build for Windows on "%TB_ARCH%"; install uv %TB_UV_MIN_MAJOR%.%TB_UV_MIN_MINOR%.%TB_UV_MIN_PATCH% or newer and put it on PATH& exit /b 1)
 
 rem Download. The second attempt skips the certificate revocation check, which fails behind
@@ -143,13 +155,16 @@ if not defined TB_UV (
   set "TB_UV=%TB_UV_DIR%\uv.exe"
 )
 
-if /i "%UV_PYTHON_PREFERENCE%"=="only-managed" if not exist "%UV_PYTHON_INSTALL_DIR%\" (>&2 echo tb: first run: uv is preparing Python in Runtime, this can take a minute ...)
+if defined TB_HOOK set "UV_OFFLINE=1"
+if defined TB_HOOK set "UV_PYTHON_DOWNLOADS=never"
+if not defined TB_HOOK if /i "%UV_PYTHON_PREFERENCE%"=="only-managed" if not exist "%UV_PYTHON_INSTALL_DIR%\" (>&2 echo tb: first run: uv is preparing Python in Runtime, this can take a minute ...)
 
 rem --- Dispatch ----------------------------------------------------------------------------
+rem "hook": exit code 0 whatever uv returns (2 would block the prompt in Claude Code).
 rem "run": uv gets the original arguments, "run SCRIPT ARGS", so --no-project is passed through
 rem UV_NO_PROJECT (cmd.exe cannot drop the first word of the argument line safely).
 if "%~1"=="run" if "%~2"=="" (>&2 echo error: usage: tb run SCRIPT [ARGS...]& exit /b 1)
 set TB_PRE=run --no-project --quiet "%TB_DIR%\agentic\cli.py"
 if "%~1"=="run" set "TB_PRE=--quiet"
 if "%~1"=="run" set "UV_NO_PROJECT=1"
-"%TB_UV%" %TB_PRE% %* & exit /b
+"%TB_UV%" %TB_PRE% %* & if defined TB_HOOK (exit /b 0) else exit /b

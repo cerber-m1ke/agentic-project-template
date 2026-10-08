@@ -57,6 +57,7 @@ class Plan:
     entries: dict[str, il.Entry]
     created: str
     kept: list[str]
+    foreign: list[str]
     warnings: list[str]
 
 
@@ -100,8 +101,8 @@ def foreign_files(root: Path) -> list[str]:
                   for p in root.iterdir() if p.name not in allowed)
 
 
-def check_template(root: Path, force: bool = False) -> list[str]:
-    """Raise unless `root` is a pristine template clone; return warnings."""
+def check_template(root: Path, force: bool = False) -> tuple[list[str], list[str]]:
+    """Raise unless `root` is a pristine template clone; return (warnings, foreign files)."""
     missing = [p for p in (il.VERSION_FILE, il.MODULES_DIR, il.PROFILES_DIR) if not (root / p).exists()]
     if missing:
         raise il.InstallerError(
@@ -127,7 +128,7 @@ def check_template(root: Path, force: bool = False) -> list[str]:
         if foreign:
             warnings.append("--force: files that are not part of the template stay in the project and are "
                             f"committed (same paths are overwritten): {', '.join(foreign)}")
-        return warnings
+        return warnings, [f.rstrip("/") for f in foreign]
     top = il.git("rev-parse", "--show-toplevel", cwd=root)
     if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root.resolve():
         raise il.InstallerError(f"{root}/.git is not a usable git repository")
@@ -140,6 +141,19 @@ def check_template(root: Path, force: bool = False) -> list[str]:
         raise il.InstallerError(
             "the template has local changes; init needs a pristine clone "
             f"(commit, stash or discard them first):\n  {shown}")
+    return [], []
+
+
+def release_warnings(root: Path, version: str, commit: str) -> list[str]:
+    """Warn when the project would not start from a published release."""
+    if not il.is_release(version):
+        return [f"template v{version} is a development state, not a release: updates will offer "
+                f"v{version.removesuffix('-dev')} once it is tagged"]
+    if commit:
+        tags = il.git("tag", "--points-at", "HEAD", cwd=root)
+        if tags.returncode == 0 and f"v{version}" not in tags.stdout.split():
+            return [f"HEAD is not the release tag v{version}: the project records v{version}, "
+                    "but its files may differ from that release"]
     return []
 
 
@@ -160,10 +174,11 @@ def kept_template_files(root: Path, entries: dict[str, il.Entry]) -> list[str]:
 
 def build_plan(args: argparse.Namespace) -> Plan:
     root = TEMPLATE_ROOT
-    warnings = check_template(root, args.force)
+    warnings, foreign = check_template(root, args.force)
     version = il.read_version(root)
     has_git = il.has_own_git(root)
     source, commit = il.template_git_info(root)
+    warnings += release_warnings(root, version, commit)
 
     name = (args.name if args.name is not None else root.name).strip()
     if not name:
@@ -197,7 +212,7 @@ def build_plan(args: argparse.Namespace) -> Plan:
 
     kept = kept_template_files(root, entries) if has_git else []
     return Plan(root, version, source, commit, has_git, name, args.language, args.profile, modules,
-                module_objs, agents, entries, created, kept, warnings)
+                module_objs, agents, entries, created, kept, foreign, warnings)
 
 
 def setup_commands(plan: Plan) -> list[list[str]]:
@@ -254,44 +269,90 @@ def git_checked(*args: str, cwd: Path) -> str:
     return res.stdout
 
 
+def local_git_settings(root: Path) -> list[tuple[str, str]]:
+    """user.* settings of the template clone's own .git/config (identity, signing key): init replaces
+    .git, and the first commit must be made by the same author that git_identity_problem() checked."""
+    res = il.git("config", "--local", "--get-regexp", r"^user\.", cwd=root)
+    if res.returncode != 0:
+        return []
+    pairs = []
+    for line in res.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        if key:
+            pairs.append((key, value))
+    return pairs
+
+
+def commit_paths(plan: Plan) -> list[str]:
+    """Exactly what the initial commit contains: payload files, the lock, template files that init
+    keeps and (with --force) foreign files. Untracked leftovers of the template folder (a local
+    CLAUDE.md alias, .obsidian/, editor folders) are never committed."""
+    paths = [*plan.entries, il.LOCK_PATH, *plan.kept, *plan.foreign]
+    return sorted(dict.fromkeys(paths))
+
+
 def perform(plan: Plan) -> None:
     root = plan.root
     os.chdir(root)
+    settings = local_git_settings(root) if plan.has_git else []
+    restore = ("Restore the template with `git checkout -- . && git clean -fd` in this folder "
+               "(its .git is still in place) and re-run init." if plan.has_git else
+               "Unpack the template into an empty folder again and re-run init.")
 
-    # 1. Delete the installer (imports are done; the running script survives its own deletion).
-    for rel_path in INSTALLER_PATHS:
-        path = root / rel_path
-        if path.exists() or path.is_symlink():
-            il.remove_path(path)
+    # 1–2. Delete the installer (imports are done; the running script survives its own deletion),
+    # then write the project files and the lock.
+    try:
+        for rel_path in INSTALLER_PATHS:
+            path = root / rel_path
+            if path.exists() or path.is_symlink():
+                il.remove_path(path)
+        for entry in plan.entries.values():
+            il.write_entry(root, entry)
+        files = {path: entry.lock_record() for path, entry in plan.entries.items()}
+        project = {"name": plan.name, "language": plan.language, "profile": plan.profile,
+                   "modules": plan.modules, "created": plan.created}
+        il.write_lock(root, il.make_lock(plan.source, plan.version, plan.commit, project, files))
+    except OSError as exc:
+        raise il.InstallerError(f"cannot write the project files: {exc}\n{restore}") from exc
 
-    # 2. Project files and lock.
-    for entry in plan.entries.values():
-        il.write_entry(root, entry)
-    files = {path: entry.lock_record() for path, entry in plan.entries.items()}
-    project = {"name": plan.name, "language": plan.language, "profile": plan.profile,
-               "modules": plan.modules, "created": plan.created}
-    il.write_lock(root, il.make_lock(plan.source, plan.version, plan.commit, project, files))
-
-    # 3. Fresh repository with one commit.
-    if plan.has_git:
-        il.rmtree(root / ".git")
-    git_checked("init", "--quiet", cwd=root)
-    git_checked("symbolic-ref", "HEAD", "refs/heads/main", cwd=root)
-    git_checked("config", "core.hooksPath", ".agents/git-hooks", cwd=root)
-    git_checked("config", "core.quotePath", "false", cwd=root)
-    if os.name == "nt":
-        git_checked("config", "core.longpaths", "true", cwd=root)
-    git_checked("add", "-A", cwd=root)
-    executables = sorted(e.path for e in plan.entries.values() if e.executable)
-    if executables:
-        git_checked("update-index", "--chmod=+x", "--", *executables, cwd=root)
+    # 3. Fresh repository with one commit of explicit paths (-f: a global excludes file of the
+    # user must not silently drop project files).
     message = f"agentic: init from template v{plan.version}"
+    finish = (f"The project files are written. Fix the problem, then run in this folder:\n"
+              f"  git init -b main && git add -f -- . && git commit --no-verify -m \"{message}\"\n"
+              f"  {tb_display()} setup")
+    try:
+        if plan.has_git:
+            il.rmtree(root / ".git")
+        git_checked("init", "--quiet", cwd=root)
+        git_checked("symbolic-ref", "HEAD", "refs/heads/main", cwd=root)
+        for key, value in settings:
+            git_checked("config", "--local", key, value, cwd=root)
+        git_checked("config", "core.hooksPath", ".agents/git-hooks", cwd=root)
+        git_checked("config", "core.quotePath", "false", cwd=root)
+        if os.name == "nt":
+            git_checked("config", "core.longpaths", "true", cwd=root)
+        paths = commit_paths(plan)
+        git_checked("add", "-f", "--", *paths, cwd=root)
+        executables = sorted(e.path for e in plan.entries.values() if e.executable)
+        if executables:
+            git_checked("update-index", "--chmod=+x", "--", *executables, cwd=root)
+        staged = set(git_checked("diff", "--cached", "--name-only", "-z", cwd=root).split("\0"))
+        lost = [p for p in [*plan.entries, il.LOCK_PATH] if p not in staged]
+        if lost:
+            raise il.InstallerError(f"files not staged for the initial commit: {', '.join(lost[:10])}")
+    except (il.InstallerError, OSError) as exc:
+        raise il.InstallerError(f"{exc}\n{finish}") from exc
     res = il.git("commit", "--quiet", "--no-verify", "-m", message, cwd=root)
     if res.returncode != 0:
         raise il.InstallerError(
             f"git commit failed: {(res.stderr or res.stdout).strip()}\n"
             f"The project files are written and staged. Fix the problem, then run:\n"
             f"  git commit --no-verify -m \"{message}\"\n  {tb_display()} setup")
+    leftovers = il.git("status", "--porcelain", "--untracked-files=normal", cwd=root)
+    if leftovers.returncode == 0 and leftovers.stdout.strip():
+        print("warning: files left from the template folder are not committed (delete them or commit "
+              "them yourself):\n  " + "\n  ".join(leftovers.stdout.splitlines()[:20]), file=sys.stderr)
 
 
 def run_setup(plan: Plan, skip: bool) -> int:
@@ -325,7 +386,8 @@ def print_next_steps(plan: Plan) -> None:
     print(f"\nInitialized agentic project \"{plan.name}\" from template v{plan.version} "
           f"({plan.profile}, {plan.language}, modules: {', '.join(plan.modules)}).")
     print("Next steps:")
-    print("  - Open the project with your agent; it starts from AGENTS.md (setup/INIT.md §5 if you came from it).")
+    print("  - Open the project with your agent; it starts from AGENTS.md. An agent that ran init by "
+          "setup/INIT.md continues with its step 5 (it read the instruction before init deleted it).")
     print("  - Describe the project in AGENTS.md outside the agentic:begin/end block.")
     if "resources" in plan.modules:
         print(f"  - Register resources: {tb} resources add <url> --description \"…\" --clone")

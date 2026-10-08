@@ -2,7 +2,8 @@ name = "devcontainer"
 description = "Dev container (.devcontainer/) with agent CLIs and uv for sandboxed agent runs"
 required = false
 default = false
-seeded = []
+# devcontainer.json belongs to the project (agent versions, mounts, features); the Dockerfile is managed.
+seeded = [".devcontainer/devcontainer.json"]
 block = []
 executable = []
 post_install = []

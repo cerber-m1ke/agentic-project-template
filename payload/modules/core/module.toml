@@ -3,6 +3,6 @@ description = "Agent entry point (AGENTS.md), the .agents/ system folder, Toolbo
 required = true
 default = true
 seeded = ["README.md", "Toolbox/README.md", ".agents/hooks/hooks.toml", ".agents/mcp.toml"]
-block = ["AGENTS.md", ".gitignore"]
+block = ["AGENTS.md", ".gitignore", ".gitattributes", ".ignore"]
 executable = ["Toolbox/tb", ".agents/git-hooks/pre-commit"]
 post_install = []
