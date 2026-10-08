@@ -103,7 +103,7 @@ def make_env(work: Path) -> dict:
                         "UV_RUN_RECURSION_DEPTH", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
     gitconfig = work / "gitconfig"
     gitconfig.write_text("[user]\n\tname = Smoke Test\n\temail = smoke@example.com\n"
-                         "[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n"
+                         "[init]\n\tdefaultBranch = master\n[commit]\n\tgpgsign = false\n"
                          "[tag]\n\tgpgsign = false\n[protocol \"file\"]\n\tallow = always\n",
                          encoding="utf-8")
     env.update(GIT_CONFIG_GLOBAL=str(gitconfig), GIT_CONFIG_NOSYSTEM="1", GIT_TERMINAL_PROMPT="0",
@@ -169,7 +169,7 @@ def stage_release(origin: Path, env: dict) -> tuple[str, str]:
     version = release_of(il.read_version(origin))  # the working tree is X.Y.Z-dev between releases
     (origin / il.VERSION_FILE).write_text(version + "\n", encoding="utf-8")
     git("init", "--quiet", cwd=origin, env=env)
-    git("symbolic-ref", "HEAD", "refs/heads/main", cwd=origin, env=env)
+    git("symbolic-ref", "HEAD", "refs/heads/master", cwd=origin, env=env)
     git("add", "-A", cwd=origin, env=env)
     git("commit", "--quiet", "--no-verify", "-m", f"release v{version}", cwd=origin, env=env)
     git("tag", f"v{version}", cwd=origin, env=env)
@@ -260,7 +260,7 @@ def stage_init(origin: Path, project: Path, env: dict, version: str, commit: str
     subject = git("log", "-1", "--format=%s", cwd=project, env=env)
     R.check("git: exactly one commit", count == "1" and subject == f"agentic: init from template v{version}",
             f"{count} commit(s), last: {subject}")
-    R.check("git: branch main", git("branch", "--show-current", cwd=project, env=env) == "main")
+    R.check("git: branch master", git("branch", "--show-current", cwd=project, env=env) == "master")
     tracked = git("ls-files", cwd=project, env=env).splitlines()
     R.check("init: commits payload files only (no template leftovers)",
             "CLAUDE.md" not in tracked and not any(t.startswith(".idea/") for t in tracked)

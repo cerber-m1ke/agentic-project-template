@@ -248,7 +248,7 @@ def print_plan(plan: Plan, full: bool) -> None:
     present = [p for p in INSTALLER_PATHS if (plan.root / p).exists() or (plan.root / p).is_symlink()]
     print(f"  1. Delete the installer: {', '.join(p + '/' if (plan.root / p).is_dir() else p for p in present)}")
     print(f"  2. Write {len(plan.entries)} project files and {il.LOCK_PATH}")
-    print(f"  3. Replace .git with a new repository (branch main); "
+    print(f"  3. Replace .git with a new repository (branch master); "
           f"commit \"agentic: init from template v{plan.version}\"")
     step = 4
     for cmd in setup_commands(plan):
@@ -319,13 +319,13 @@ def perform(plan: Plan) -> None:
     # user must not silently drop project files).
     message = f"agentic: init from template v{plan.version}"
     finish = (f"The project files are written. Fix the problem, then run in this folder:\n"
-              f"  git init -b main && git add -f -- . && git commit --no-verify -m \"{message}\"\n"
+              f"  git init -b master && git add -f -- . && git commit --no-verify -m \"{message}\"\n"
               f"  {tb_display()} setup")
     try:
         if plan.has_git:
             il.rmtree(root / ".git")
         git_checked("init", "--quiet", cwd=root)
-        git_checked("symbolic-ref", "HEAD", "refs/heads/main", cwd=root)
+        git_checked("symbolic-ref", "HEAD", "refs/heads/master", cwd=root)
         for key, value in settings:
             git_checked("config", "--local", key, value, cwd=root)
         git_checked("config", "core.hooksPath", ".agents/git-hooks", cwd=root)
