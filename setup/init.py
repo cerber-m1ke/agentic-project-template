@@ -109,6 +109,13 @@ def check_template(root: Path, force: bool = False) -> tuple[list[str], list[str
             f"{root} is not an agentic-project-template folder (missing: {', '.join(missing)})")
     if (root / il.LOCK_PATH).exists():
         raise il.InstallerError(f"{il.LOCK_PATH} already exists: this folder is already an agentic project")
+    for parent in root.resolve().parents:
+        if (parent / il.LOCK_PATH).is_file():
+            # e.g. Resources/agentic-project-template of a project: a resource, not a new project.
+            raise il.InstallerError(
+                f"this template clone lives inside the agentic project {parent} "
+                f"({root.resolve().relative_to(parent).as_posix()}): init would replace its .git. "
+                "To create a project, clone the template into a folder of its own")
     if shutil.which("git") is None:
         raise il.InstallerError("git is not installed (or not on PATH); install git and re-run")
     dot_git = root / ".git"

@@ -22,8 +22,8 @@
 | Команда | Назначение |
 |---|---|
 | `Toolbox/tb resources status` | Что есть локально, текущая ветка, есть ли изменения |
-| `Toolbox/tb resources clone <name>…` | Склонировать ресурсы из каталога; `--all` — все |
-| `Toolbox/tb resources add <url> [--name N] [--branch B] [--kind git\|folder] [--description "…"] [--clone]` | Добавить ресурс в каталог (с `--clone` — сразу склонировать). Путь к локальной рабочей копии записывает её `origin` и предупреждает о работе, которая есть только в этой копии |
+| `Toolbox/tb resources clone <name>…` | Склонировать ресурсы из каталога; `--all` — все; `<name> --from <путь>` — из локальной копии, пока upstream недоступен (`origin` — url каталога) |
+| `Toolbox/tb resources add <url> [--name N] [--branch B] [--kind git\|folder] [--description "…"] [--clone]` | Добавить ресурс в каталог (с `--clone` — сразу склонировать). Путь к локальной рабочей копии записывает её `origin` и предупреждает о работе, которая есть только в этой копии; если upstream недоступен, `--clone` клонирует саму копию |
 | `Toolbox/tb setup --clone-missing` | Склонировать все недостающие ресурсы |
 
 На Windows (PowerShell) — `Toolbox\tb.cmd resources …`.

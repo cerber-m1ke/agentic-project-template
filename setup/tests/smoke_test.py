@@ -300,6 +300,11 @@ def stage_init(origin: Path, project: Path, env: dict, version: str, commit: str
     return lock
 
 
+def origin_of(project: Path) -> str:
+    """Template source recorded in the project's lock."""
+    return tomllib.loads(read(project / il.LOCK_PATH) or "")["template"]["source"]
+
+
 def lock_files_of(project: Path) -> list[str]:
     return list(tomllib.loads(read(project / il.LOCK_PATH) or "").get("files", {}))
 
@@ -345,6 +350,23 @@ def stage_toolbox(project: Path, env: dict, work: Path) -> None:
             and (project / "Resources" / "lib" / "README.md").is_file(), tail(output(res)))
     res = run([*tb, "resources", "status"], project, env)
     R.check("tb resources status", res.returncode == 0 and "lib" in res.stdout, tail(output(res)))
+    # Adopt from a local working copy whose upstream is unreachable: clone the copy, origin = upstream.
+    work_copy, missing = work / "lib-work", (work / "remotes" / "missing.git").as_posix()
+    git("clone", "--quiet", str(bare), str(work_copy), cwd=work, env=env)
+    git("remote", "set-url", "origin", missing, cwd=work_copy, env=env)
+    res = run([*tb, "resources", "add", str(work_copy), "--name", "lib2", "--clone"], project, env)
+    lib2 = project / "Resources" / "lib2"
+    origin = git("remote", "get-url", "origin", cwd=lib2, env=env) if (lib2 / ".git").exists() else ""
+    R.check("tb resources add <local copy> --clone: falls back to the local copy, origin = upstream",
+            res.returncode == 0 and (lib2 / "README.md").is_file() and origin == missing
+            and missing in read(project / "Resources" / "resources.toml"), tail(output(res)))
+    # A template clone inside a project (e.g. a resource) must refuse to init.
+    nested = project / "Resources" / "template-copy"
+    git("clone", "--quiet", str(origin_of(project)), str(nested), cwd=work, env=env)
+    res = run([sys.executable, str(nested / "setup" / "init.py"), "--name", "x", "--yes"], nested, env, timeout=300)
+    R.check("init refuses inside an agentic project", res.returncode == 1
+            and "inside the agentic project" in output(res) and (nested / "setup").is_dir(), tail(output(res)))
+    il.rmtree(nested)
     draft = project / "Knowledge" / "Plans" / "draft.md"
     draft.write_text("unfinished draft without frontmatter\n", encoding="utf-8")  # untracked: ignored
     paths = [p for p in (NOTE_PATH, "Resources/resources.toml") if (project / p).is_file()]

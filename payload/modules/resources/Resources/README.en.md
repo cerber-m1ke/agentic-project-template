@@ -22,8 +22,8 @@ folders (documents, data). The template does not prescribe the content or the st
 | Command | Purpose |
 |---|---|
 | `Toolbox/tb resources status` | What exists locally, the current branch, whether there are changes |
-| `Toolbox/tb resources clone <name>…` | Clone resources from the catalog; `--all` — all of them |
-| `Toolbox/tb resources add <url> [--name N] [--branch B] [--kind git\|folder] [--description "…"] [--clone]` | Add a resource to the catalog (with `--clone`, clone it right away). A path to a local working copy records its `origin` and warns about work that exists only in that copy |
+| `Toolbox/tb resources clone <name>…` | Clone resources from the catalog; `--all` — all of them; `<name> --from <path>` — from a local copy while the upstream is unreachable (`origin` — the catalog url) |
+| `Toolbox/tb resources add <url> [--name N] [--branch B] [--kind git\|folder] [--description "…"] [--clone]` | Add a resource to the catalog (with `--clone`, clone it right away). A path to a local working copy records its `origin` and warns about work that exists only in that copy; if the upstream is unreachable, `--clone` clones the copy itself |
 | `Toolbox/tb setup --clone-missing` | Clone all missing resources |
 
 On Windows (PowerShell): `Toolbox\tb.cmd resources …`.

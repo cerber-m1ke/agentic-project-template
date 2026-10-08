@@ -41,6 +41,9 @@ def register(sub: argparse._SubParsersAction) -> None:
     p = actions.add_parser("clone", help="clone catalogued git resources into Resources/")
     p.add_argument("names", nargs="*", metavar="name")
     p.add_argument("--all", action="store_true", help="clone every git resource not cloned yet")
+    p.add_argument("--from", dest="from_path", metavar="PATH",
+                   help="clone from a local copy (e.g. while the upstream is unreachable); origin is then "
+                        "set to the catalog url")
     p.set_defaults(func=cmd_clone)
     p = actions.add_parser("add", help=f"add a resource to {CATALOG}")
     p.add_argument("url", help="repository URL (git) or source location (folder)")
@@ -61,7 +64,9 @@ def cmd_status(_args: argparse.Namespace) -> int:
 def cmd_clone(args: argparse.Namespace) -> int:
     if not args.names and not args.all:
         return common.fail("name the resources to clone, or use --all")
-    return clone(args.names, all_missing=args.all)
+    if args.from_path and (args.all or len(args.names) != 1):
+        return common.fail("--from clones exactly one resource: tb resources clone <name> --from <path>")
+    return clone(args.names, all_missing=args.all, from_path=args.from_path)
 
 
 def cmd_add(args: argparse.Namespace) -> int:
@@ -195,7 +200,30 @@ def print_status() -> tuple[list[str], bool]:
 
 # --- clone / add ----------------------------------------------------------------------------
 
-def clone(names: list[str], all_missing: bool = False) -> int:
+def _clone_from_local(name: str, entry: dict[str, Any], source: Path, dest: Path) -> int:
+    """Fresh clone from a local copy, then point origin at the catalog url (a fresh clone in a new
+    folder, so nothing bound to the old path moves; local-only branches arrive as origin/*)."""
+    url, shown = str(entry.get("url") or ""), f"{RESOURCES_DIR}/{name}/"
+    source = source.expanduser()
+    if not source.is_dir() or common.git("rev-parse", "--git-dir", cwd=source).returncode != 0:
+        return common.fail(f"{name}: {source} is not a git repository")
+    common.out(f"{name}: cloning the local copy {source} into {shown}")
+    sys.stdout.flush()
+    result = subprocess.run(["git", "clone", "--", str(source), str(dest)], cwd=common.project_root())
+    if result.returncode != 0:
+        return common.fail(f"{name}: git clone failed (exit {result.returncode})")
+    if url and common.git("remote", "set-url", "origin", url, cwd=dest).returncode != 0:
+        return common.fail(f"{name}: cloned, but `git remote set-url origin {url}` failed")
+    branch = entry.get("branch")
+    if branch and common.git("checkout", "--quiet", str(branch), cwd=dest).returncode != 0:
+        common.warn(f"{name}: branch {branch!r} is not in the local copy; left on "
+                    f"{common.git('branch', '--show-current', cwd=dest).stdout.strip() or 'HEAD'}")
+    common.out(f"  ✓ cloned {shown} from the local copy; origin = {url or '(unchanged)'}")
+    common.out(f"  When the upstream is reachable: git -C {shown} fetch --prune origin")
+    return 0
+
+
+def clone(names: list[str], all_missing: bool = False, from_path: str | None = None) -> int:
     entries, error = load_catalog()
     if error:
         return common.fail(error)
@@ -220,6 +248,9 @@ def clone(names: list[str], all_missing: bool = False) -> int:
             continue
         if dest.exists():
             common.out(f"{name}: already present in {shown}, skipped")
+            continue
+        if from_path:
+            code = _clone_from_local(name, entry, Path(from_path), dest) or code
             continue
         url = str(entry.get("url") or "")
         if not url:
@@ -282,11 +313,15 @@ def _upstream_of_local(path: Path) -> tuple[str | None, str]:
 
 def add(url: str, name: str | None = None, branch: str | None = None, kind: str = "git",
         description: str | None = None, do_clone: bool = False) -> int:
+    local_copy: Path | None = None
     if kind == "git" and is_local_path(url):
-        upstream, error = _upstream_of_local(Path(url.removeprefix("file://")))
+        local = Path(url.removeprefix("file://"))
+        upstream, error = _upstream_of_local(local)
         if upstream is None:
             return common.fail(error)
         name = name or name_from_url(url)
+        if upstream != str(local):  # a working copy (a bare repository is kept as the url itself)
+            local_copy = local
         url = upstream
     name = name or name_from_url(url)
     if not _NAME_RE.match(name) or name.lower() in RESERVED:
@@ -333,7 +368,12 @@ def add(url: str, name: str | None = None, branch: str | None = None, kind: str 
         if kind != "git":
             common.warn(f"{name}: --clone works for git resources only")
             return 0
-        return clone([name])
+        code = clone([name])
+        if code and local_copy is not None and not _resource_dir(name).exists():
+            common.warn(f"{name}: the upstream is unreachable; cloning the local copy instead "
+                        "(its origin is set to the upstream url)")
+            code = clone([name], from_path=str(local_copy))
+        return code
     if kind == "git":
         common.out(f"Clone it: Toolbox/tb resources clone {name}")
     return 0
