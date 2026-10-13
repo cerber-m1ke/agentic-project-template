@@ -1,8 +1,9 @@
 # Обновление проекта из шаблона
 
 Инструкция Агенту. Выполняется из свежей копии шаблона `Runtime/update/<v>/`, которую загрузил
-`Toolbox/tb update fetch` (skill `agentic-update`). `<v>` — имя этого каталога. Архитектура —
-`setup/DESIGN.md` §6.4.
+`Toolbox/tb update fetch` (skill `agentic-update`). `<v>` — имя этого каталога, `<версия>` — содержимое
+его `setup/VERSION`. Для релиза они совпадают; при `--ref` на ветку или коммит каталог назван по ref.
+Архитектура — `setup/DESIGN.md` §6.4.
 
 - Все команды — из корня проекта. Windows: `Toolbox\tb.cmd` вместо `Toolbox/tb`, пути через `\`.
 - С человеком говори на языке проекта (`[project] language` в `.agents/agentic.lock`).
@@ -43,7 +44,7 @@ Toolbox/tb run Runtime/update/<v>/setup/update.py plan --project .
 
 ## 3. Что меняется
 
-Прочитай `Runtime/update/<v>/CHANGELOG.md`: все разделы новее установленной версии до `<v>` включительно.
+Прочитай `Runtime/update/<v>/CHANGELOG.md`: все разделы новее установленной версии до `<версия>` включительно.
 Особое внимание — «Миграции» и ломающие изменения.
 
 Для каждого `conflict` и `seeded-changed` посмотри разницу:
@@ -81,7 +82,7 @@ Toolbox/tb run Runtime/update/<v>/setup/update.py diff --project . <path>
 Toolbox/tb run Runtime/update/<v>/setup/update.py apply --project . --yes [--take-template <path>]… [--keep-local <path>]…
 ```
 
-`apply` создаёт ветку `agentic/update-<v>`, применяет файлы и миграции, переписывает `agentic.lock`
+`apply` создаёт ветку `agentic/update-<версия>`, применяет файлы и миграции, переписывает `agentic.lock`
 и ничего не коммитит. `--no-branch` — только по просьбе человека. Прочитай вывод: пропущенные конфликты,
 ошибки миграций. При ошибке остановись, покажи её человеку и предложи откат (§8).
 
@@ -97,7 +98,7 @@ Toolbox/tb run Runtime/update/<v>/setup/update.py apply --project . --yes [--tak
 
 1. Отчёт человеку: что обновлено, решения по конфликтам, миграции, что сделано вручную, что осталось;
    `git status --short`, `git diff --stat`.
-2. После OK — коммит в ветке `agentic/update-<v>`. Только явные пути из `git status --porcelain`
+2. После OK — коммит в ветке `agentic/update-<версия>`. Только явные пути из `git status --porcelain`
    (удалённые — тоже через `git add -- <path>`), не `git add -A`:
 
    ```
@@ -109,7 +110,7 @@ Toolbox/tb run Runtime/update/<v>/setup/update.py apply --project . --yes [--tak
    ```
 
 3. После подтверждения слияния: `git switch <исходная ветка>`,
-   `git merge --ff-only agentic/update-<v>`, `git branch -d agentic/update-<v>`.
+   `git merge --ff-only agentic/update-<версия>`, `git branch -d agentic/update-<версия>`.
 4. Удали `Runtime/update/` целиком — последним шагом.
 5. Предложи перезапустить агента, чтобы подхватились обновлённые skills и хуки.
 
@@ -117,9 +118,9 @@ Toolbox/tb run Runtime/update/<v>/setup/update.py apply --project . --yes [--tak
 
 Только с согласия человека. Ресурсы (`Resources/*`) и `Runtime/` обновление не трогает.
 
-- **До коммита** (в ветке `agentic/update-<v>`; дерево перед `apply` было чистым):
-  `git reset --hard`, `git clean -fd`, `git switch <исходная ветка>`, `git branch -D agentic/update-<v>`.
-- **После коммита, до слияния:** `git switch <исходная ветка>`, `git branch -D agentic/update-<v>`.
+- **До коммита** (в ветке `agentic/update-<версия>`; дерево перед `apply` было чистым):
+  `git reset --hard`, `git clean -fd`, `git switch <исходная ветка>`, `git branch -D agentic/update-<версия>`.
+- **После коммита, до слияния:** `git switch <исходная ветка>`, `git branch -D agentic/update-<версия>`.
 - **После слияния:** `git revert <коммит обновления>` и коммит отката.
 
 Затем `Toolbox/tb agents link` и `Toolbox/tb agents doctor`. `agentic.lock` откатывается вместе с файлами,

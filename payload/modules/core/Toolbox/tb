@@ -15,8 +15,9 @@
 #
 # Environment:
 #   TB_ROOT                   root override for running the template's own tb (template
-#                             development, init). It must contain .agents/agentic.lock or
-#                             setup/VERSION, and it is ignored by the tb of an initialized project.
+#                             development, init), which refuses to run without it. It must contain
+#                             .agents/agentic.lock or setup/VERSION, and it is ignored by the tb of
+#                             an initialized project.
 #   AGENTIC_UV_DOWNLOAD_URL   base URL of uv releases (default: GitHub); the asset is fetched
 #                             from <base>/<version>/<asset>
 #   HTTPS_PROXY               used by curl/wget and by uv
@@ -239,6 +240,13 @@ if [ -n "${TB_ROOT-}" ]; then
 fi
 tb_hook=
 [ "${1-}" = hook ] && tb_hook=1
+# The template's own copy (payload/modules/core/Toolbox) is not a project: without TB_ROOT it would
+# put Runtime/ (uv, Python) into the payload, where git ignores it and init would install it.
+if [ "$ROOT" = "$tb_home" ] && [ ! -f "$ROOT/.agents/agentic.lock" ] &&
+  [ -f "$tb_home/../../../setup/VERSION" ] && [ -f "$tb_home/../../../payload/modules/core/module.toml" ]; then
+  [ -n "$tb_hook" ] && exit 0
+  die "this tb is the template's payload copy; run it from the template root with TB_ROOT=. (see AGENTS.md)"
+fi
 if [ -n "$tb_windows" ] && command -v cygpath >/dev/null 2>&1; then
   # Native Windows programs (uv, Python) need C:/... paths; MSYS tools accept them too.
   ROOT=$(cygpath -m "$ROOT")

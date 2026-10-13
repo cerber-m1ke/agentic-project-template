@@ -62,7 +62,8 @@
 
 ## Проверки
 
-uv и Python скачиваются в `Runtime/` шаблона.
+uv и Python скачиваются в `Runtime/` шаблона. `tb` из payload запускай только из корня клона с `TB_ROOT=.`:
+без него он откажется работать.
 
 ```sh
 TB_ROOT=. payload/modules/core/Toolbox/tb run setup/i18n_check.py

@@ -36,6 +36,9 @@ import installer_lib as il  # noqa: E402
 
 COPY_EXCLUDE_ANYWHERE = {".git", "__pycache__", ".DS_Store"}
 COPY_EXCLUDE_TOP = {"Runtime", "CLAUDE.md"}
+PAYLOAD_JUNK = ("payload/modules/core/Runtime/tools/junk-from-payload.txt",
+                "payload/modules/core/.idea/junk-from-payload.xml",
+                "payload/modules/knowledge/Knowledge/.obsidian/junk-from-payload.json")
 WINDOWS = os.name == "nt"
 NAME = "demo"
 AGENTS = ["claude", "codex"]
@@ -191,6 +194,18 @@ def stage_refusals(origin: Path, work: Path, env: dict) -> None:
             res.returncode == 1 and "worktree" in output(res) and (linked / "setup").is_dir()
             and dot_git.is_file() and os.access(dot_git, os.R_OK), tail(output(res)))
 
+    # The payload copy of tb is not a project's tb: without TB_ROOT it refuses (a hook stays silent)
+    # instead of putting Runtime/ into the payload.
+    payload_tb = main_clone / "payload" / "modules" / "core" / "Toolbox"
+    payload_cmd = (["cmd", "/c", str(payload_tb / "tb.cmd")] if WINDOWS else ["sh", str(payload_tb / "tb")])
+    res = run([*payload_cmd, "version"], main_clone, env, timeout=300)
+    R.check("payload tb refuses to run without TB_ROOT",
+            res.returncode == 1 and "TB_ROOT" in output(res)
+            and not (payload_tb.parent / "Runtime").exists(), tail(output(res)))
+    res = run([*payload_cmd, "hook", "kb-suggest", "--agent", "claude"], main_clone, env, timeout=300)
+    R.check("payload tb: a hook exits 0", res.returncode == 0 and not (payload_tb.parent / "Runtime").exists(),
+            tail(output(res)))
+
     unpacked = work / "refuse-unpacked"
     shutil.copytree(origin, unpacked, ignore=shutil.ignore_patterns(".git"), symlinks=True)
     res = init(unpacked, "--name", NAME, "--dry-run")
@@ -218,6 +233,10 @@ def stage_init(origin: Path, project: Path, env: dict, version: str, commit: str
         os.symlink("AGENTS.md", project / "CLAUDE.md")
     (project / ".idea").mkdir()
     (project / ".idea" / "workspace.xml").write_text("<project/>\n", encoding="utf-8")
+    # Files that git ignores inside payload/ are not template files and must not be installed.
+    for junk in PAYLOAD_JUNK:
+        (project / junk).parent.mkdir(parents=True, exist_ok=True)
+        (project / junk).write_text("junk\n", encoding="utf-8")
     git("config", "user.name", "Local Smoke", cwd=project, env=env)
     args = ["--name", NAME, "--profile", "software", "--language", "ru", "--agents", ",".join(AGENTS), "--yes"]
     if WINDOWS:
@@ -244,6 +263,10 @@ def stage_init(origin: Path, project: Path, env: dict, version: str, commit: str
         if local != rec.get("sha256"):
             bad.append(path)
     R.check(f"lock: {len(files)} file hashes match the project", files and not bad, f"mismatch: {bad[:5]}")
+    junk_installed = [p for p in files if "junk-from-payload" in p]
+    junk_installed += [p for p in ("Runtime/tools/junk-from-payload.txt", ".idea/junk-from-payload.xml",
+                                   "Knowledge/.obsidian/junk-from-payload.json") if (project / p).exists()]
+    R.check("init: files that git ignores in payload/ are not installed", not junk_installed, f"{junk_installed}")
     leftovers = [p for p in ("setup", "payload", "init.sh", "init.cmd", "README.en.md", "CHANGELOG.md")
                  if (project / p).exists()]
     R.check("init: installer removed", not leftovers, f"left: {leftovers}")

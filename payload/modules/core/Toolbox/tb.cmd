@@ -13,7 +13,7 @@ rem
 rem "hook ..." (agent hooks) never blocks the agent: exit code 0 whatever happens, no downloads of
 rem uv, Python or packages (offline; does nothing until "tb setup" prepared Runtime\).
 rem
-rem Environment: TB_ROOT (root override for the template's own tb; must contain
+rem Environment: TB_ROOT (root override for the template's own tb, required by it; must contain
 rem .agents\agentic.lock or setup\VERSION; ignored by the tb of an initialized project),
 rem AGENTIC_UV_DOWNLOAD_URL (base URL of uv
 rem releases; the asset is fetched from BASE/VERSION/ASSET), HTTPS_PROXY. UV_* variables that
@@ -48,6 +48,12 @@ if /i not "%ROOT%"=="%TB_HOME%" if exist "%TB_HOME%\.agents\agentic.lock" (>&2 e
 if defined TB_ROOT if not exist "%ROOT%\.agents\agentic.lock" if not exist "%ROOT%\setup\VERSION" (>&2 echo error: TB_ROOT "%TB_ROOT%" is neither an agentic project nor the template: no .agents\agentic.lock or setup\VERSION& exit /b 1)
 set "TB_HOOK="
 if "%~1"=="hook" set "TB_HOOK=1"
+rem The template's own copy (payload\modules\core\Toolbox) is not a project: without TB_ROOT it would
+rem put Runtime\ (uv, Python) into the payload, where git ignores it and init would install it.
+set "TB_PAYLOAD="
+if /i "%ROOT%"=="%TB_HOME%" if not exist "%ROOT%\.agents\agentic.lock" if exist "%TB_HOME%\..\..\..\setup\VERSION" if exist "%TB_HOME%\..\..\..\payload\modules\core\module.toml" set "TB_PAYLOAD=1"
+if defined TB_PAYLOAD if defined TB_HOOK exit /b 0
+if defined TB_PAYLOAD (>&2 echo error: this tb is the template's payload copy; run it from the template root with TB_ROOT=. - see AGENTS.md& exit /b 1)
 
 rem --- Environment -------------------------------------------------------------------------
 set "AGENTIC_ROOT=%ROOT%"

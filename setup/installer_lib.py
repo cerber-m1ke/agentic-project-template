@@ -44,6 +44,10 @@ PLACEHOLDER_RE = re.compile(r"\{\{agentic\.([A-Za-z0-9_]+)\}\}")
 PLACEHOLDER_KEYS = ("project_name", "language", "profile", "date", "profile_rules")
 SKIP_NAMES = frozenset({"__pycache__", ".DS_Store", "Thumbs.db", "desktop.ini"})
 SKIP_SUFFIXES = (".pyc", ".pyo")
+# Without git (an unpacked archive) payload files come from a directory walk that also skips these
+# folders: editor and Obsidian state, and the Runtime/ that tb puts next to its Toolbox.
+WALK_SKIP_DIRS = frozenset({".git", ".idea", ".vscode", ".obsidian", ".trash", "__MACOSX"})
+WALK_SKIP_TOP_DIRS = frozenset({"Runtime"})
 CRLF_SUFFIXES = frozenset({".cmd", ".bat"})  # mirrors the project's .gitattributes
 
 # Sentinels returned by local_hash() besides a sha256 hex digest.
@@ -372,20 +376,62 @@ class Entry:
         return {"class": self.cls, "module": self.module, "sha256": self.sha256}
 
 
-def module_files(module: Module, lang: str) -> list[tuple[str, Path]]:
+def _git_payload_files(template_root: Path, module_path: Path) -> list[str] | None:
+    """Files of a module that git does not ignore (tracked or new), relative to the module folder.
+
+    None when the template is not a git work tree of its own (an unpacked archive): then the caller
+    walks the folder. git never consults a parent repository here (has_own_git)."""
+    if not has_own_git(template_root):
+        return None
+    rel_module = module_path.relative_to(template_root).as_posix()
+    res = git("ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", rel_module,
+              cwd=template_root)
+    if res.returncode != 0:
+        raise InstallerError(f"git ls-files failed in {template_root}: {(res.stderr or res.stdout).strip()}")
+    files = []
+    for path in res.stdout.split("\0"):
+        if not path:
+            continue
+        rel = path[len(rel_module) + 1:]
+        if (module_path / rel).is_file():  # tracked but deleted in the work tree: not a payload file
+            files.append(rel)
+    return sorted(files)
+
+
+def _walk_payload_files(module_path: Path) -> list[str]:
+    files = []
+    for dirpath, dirnames, filenames in os.walk(module_path):
+        top = Path(dirpath) == module_path
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_NAMES and d not in WALK_SKIP_DIRS
+                             and not (top and d in WALK_SKIP_TOP_DIRS))
+        rel_dir = Path(dirpath).relative_to(module_path)
+        files.extend((rel_dir / fname).as_posix() for fname in filenames)
+    return sorted(files)
+
+
+def module_files(module: Module, lang: str, template_root: Path) -> list[tuple[str, Path]]:
+    """(destination, source) of every payload file of a module for the language.
+
+    In a git clone of the template the files are what git tracks or would track: files that git
+    ignores (an editor's .idea/, Obsidian's .obsidian/, a Runtime/ made by tb without TB_ROOT) are
+    not part of the template, and `git status` would not show them to the pristine-clone check."""
+    listed = _git_payload_files(template_root, module.path)
+    if listed is None:
+        listed = _walk_payload_files(module.path)
     files: list[tuple[str, Path]] = []
-    for dirpath, dirnames, filenames in os.walk(module.path):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_NAMES)
-        rel_dir = Path(dirpath).relative_to(module.path)
-        for fname in sorted(filenames):
-            if fname in SKIP_NAMES or fname.endswith(SKIP_SUFFIXES):
-                continue
-            if rel_dir == Path(".") and fname == "module.toml":
-                continue
-            dest = dest_name(fname, lang)
-            if dest is None:
-                continue
-            files.append(((rel_dir / dest).as_posix(), Path(dirpath) / fname))
+    for rel in listed:
+        rel_path = Path(rel)
+        fname = rel_path.name
+        if fname in SKIP_NAMES or fname.endswith(SKIP_SUFFIXES):
+            continue
+        if any(part in SKIP_NAMES for part in rel_path.parts[:-1]):
+            continue
+        if rel == "module.toml":
+            continue
+        dest = dest_name(fname, lang)
+        if dest is None:
+            continue
+        files.append(((rel_path.parent / dest).as_posix(), module.path / rel_path))
     return files
 
 
@@ -396,7 +442,7 @@ def materialize(template_root: Path, module_names: list[str], modules: dict[str,
     for name in module_names:
         mod = modules[name]
         produced: set[str] = set()
-        for dest, src in module_files(mod, ctx.language):
+        for dest, src in module_files(mod, ctx.language, template_root):
             source = src.relative_to(template_root).as_posix()
             if dest in entries:
                 other = entries[dest]

@@ -5,7 +5,8 @@
 # exclude-newer = "2026-10-01T00:00:00Z"
 # ///
 """Unit tests of the parts where a mistake loses project data or misleads the user: managed-block
-markers, versions and migrations, update classification, the secret scanner, resource URLs.
+markers, versions and migrations, update classification, payload files, the secret scanner,
+resource URLs.
 
     TB_ROOT=. payload/modules/core/Toolbox/tb run setup/tests/unit_test.py
 """
@@ -160,6 +161,49 @@ class Secrets(unittest.TestCase):
         for text in self.CLEAN:
             with self.subTest(text=text):
                 self.assertEqual(secret_scan.scan_text(text), [], text)
+
+
+class PayloadFiles(unittest.TestCase):
+    """Only template files reach a project: never what git ignores in payload/ (editor and Obsidian
+    folders, a Runtime/ made by tb started without TB_ROOT)."""
+
+    JUNK = ("Runtime/tools/uv/uv", ".idea/workspace.xml", "Knowledge/.obsidian/app.json",
+            "sub/__pycache__/x.pyc")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.core = self.root / il.MODULES_DIR / "core"
+        files = {"module.toml": 'name = "core"\n', ".gitignore": "/Runtime/\n", "a.ru.md": "ru\n",
+                 "a.en.md": "en\n", "sub/b.md": "b\n", **{j: "junk\n" for j in self.JUNK}}
+        for rel, text in files.items():
+            (self.core / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.core / rel).write_text(text, encoding="utf-8")
+        (self.root / ".gitignore").write_text(".idea/\n.obsidian/\n__pycache__/\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def files(self) -> list[str]:
+        module = il.load_modules(self.root)["core"]
+        return [dest for dest, _src in il.module_files(module, "ru", self.root)]
+
+    def git(self, *args: str) -> None:
+        res = il.run(["git", "-c", "user.name=Unit", "-c", "user.email=unit@example.com",
+                      "-c", "commit.gpgsign=false", *args], cwd=self.root)
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_unpacked_archive_skips_junk_folders(self):
+        self.assertEqual(sorted(self.files()), [".gitignore", "a.md", "sub/b.md"])
+
+    def test_git_clone_skips_ignored_and_deleted_files(self):
+        self.git("init", "--quiet")
+        (self.core / "gone.md").write_text("gone\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "--quiet", "-m", "init")
+        (self.core / "gone.md").unlink()
+        (self.core / "new.md").write_text("new\n", encoding="utf-8")  # untracked, not ignored
+        self.assertEqual(sorted(self.files()), [".gitignore", "a.md", "new.md", "sub/b.md"])
 
 
 class ResourceUrls(unittest.TestCase):
