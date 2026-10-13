@@ -25,7 +25,7 @@ KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 NOTE_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
 WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)),
                     *(f"lpt{i}" for i in range(1, 10))}
-REQUIRED_KEYS = ("type", "title", "description", "status", "created")
+REQUIRED_KEYS = ("type", "title", "description", "created")  # + `status` for types that have statuses
 LIST_KEYS = ("tags", "aliases", "resources", "applies_to")
 TEMPLATES_DIR = "_templates"
 AGENTS_TOKEN_BUDGET = 1500
@@ -110,7 +110,12 @@ class Note:
     @property
     def status(self) -> str:
         s = self.meta.get("status")
-        return str(s) if s not in (None, "") else "?"
+        return str(s) if s not in (None, "") else ""
+
+    @property
+    def label(self) -> str:
+        """`type/status`, or just `type` for notes without a status."""
+        return f"{self.type}/{self.status}" if self.status else self.type
 
     @property
     def slug(self) -> str:
@@ -518,7 +523,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         common.out(f'No matches for "{query}".' if query else "No notes match the filters.")
         return 0
     for h in hits:
-        head = f"{h.note.rel}  [{h.note.type}/{h.note.status}]  {h.note.title}"
+        head = f"{h.note.rel}  [{h.note.label}]  {h.note.title}"
         common.out(f"{head} — {h.note.description}" if h.note.description else head)
         if not args.brief and h.snippet:
             common.out(f"    {h.snippet}")
@@ -552,7 +557,7 @@ def _find_note(ref: str, notes: list[Note]) -> tuple[Path | None, int]:
         if candidates:
             common.out(f'"{ref}" is ambiguous:')
             for n in candidates:
-                common.out(f"  {n.rel}  [{n.type}/{n.status}]  {n.title}")
+                common.out(f"  {n.rel}  [{n.label}]  {n.title}")
             return None, common.fail("specify the path")
         return None, common.fail(f'note not found: {ref} (try: tb kb search {ref})')
     try:
@@ -594,7 +599,7 @@ def cmd_related(args: argparse.Namespace) -> int:
     backlinks = sorted({n.rel: n for n in notes if n.path != note.path
                         and any(_key(l.path) == key for l in n.links)}.values(), key=lambda n: n.rel)
 
-    common.out(f"{note.rel}  [{note.type}/{note.status}]  {note.title}")
+    common.out(f"{note.rel}  [{note.label}]  {note.title}")
     common.out(f"Links ({len(outgoing)}):" if outgoing else "Links: none")
     for line in outgoing:
         common.out(f"  {line}")
@@ -706,7 +711,8 @@ def cmd_index(args: argparse.Namespace) -> int:
                 target = Path(os.path.relpath(n.path, common.project_root() / args.base)).as_posix()
             target = f"<{target}>" if " " in target else target
             desc = f" — {n.description}" if n.description else ""
-            common.out(f"- [{_md_link_text(n.title)}]({target}){desc} ({n.status})")
+            status = f" ({n.status})" if n.status else ""
+            common.out(f"- [{_md_link_text(n.title)}]({target}){desc}{status}")
     return 0
 
 
@@ -814,8 +820,16 @@ def lint_note(note: Note, slugs: dict[str, list[Note]], resource_names: set[str]
         if spec and note.folder_type and ntype != note.folder_type:
             err(f"type '{ntype}' does not match folder {note.folder}/ (expected '{note.folder_type}')")
         status = meta.get("status")
-        if spec and status not in (None, "") and status not in spec["statuses"]:
-            err(f"status '{status}' is not allowed for {ntype} (allowed: {', '.join(spec['statuses'])})")
+        if spec and spec["statuses"] and status in (None, ""):
+            err("missing required key 'status'")
+        elif spec and status not in (None, "") and status not in spec["statuses"]:
+            if status in common.RETIRED_STATUSES.get(ntype, ()):
+                warn(f"status '{status}' is retired: the note is obsolete, delete it (git history keeps it)")
+            elif not spec["statuses"]:
+                warn(f"{ntype} notes have no status: remove 'status'")
+            else:
+                err(f"status '{status}' is not allowed for {ntype} "
+                    f"(allowed: {', '.join(spec['statuses'])})")
         for key in ("title", "description"):
             v = meta.get(key)
             if v not in (None, "") and not isinstance(v, str):
@@ -842,15 +856,9 @@ def lint_note(note: Note, slugs: dict[str, list[Note]], resource_names: set[str]
                 err(f"'{key}' must be a list")
         if meta.get("applies_to") and ntype not in ("gotcha", "example"):
             warn("'applies_to' is meant for gotcha/example notes")
-        superseded_by = meta.get("superseded_by")
-        if status == "superseded" and superseded_by in (None, "", []):
-            err("status 'superseded' requires 'superseded_by'")
-        if superseded_by not in (None, "", []):
-            if ntype != "decision":
-                warn("'superseded_by' is meant for decision notes")
-            for ref in superseded_by if isinstance(superseded_by, list) else [superseded_by]:
-                if not _reference_exists(str(ref), note, slugs):
-                    err(f"'superseded_by' points to a missing note: {ref}")
+        if meta.get("superseded_by") not in (None, "", []):
+            warn("'superseded_by' is retired: delete the superseded decision and explain the change "
+                 "in the new one")
         if resource_names is not None:
             for item in note.list_field("resources"):
                 name = resource_name(item)
@@ -876,18 +884,6 @@ def lint_note(note: Note, slugs: dict[str, list[Note]], resource_names: set[str]
         if _WIKILINK_RE.search(line):
             warn("wikilink found; use relative Markdown links [text](path.md)", note.body_offset + i)
     return problems
-
-
-def _reference_exists(ref: str, note: Note, slugs: dict[str, list[Note]]) -> bool:
-    m = _LINK_RE.search(ref)
-    target = m.group(3) if m else ref
-    if "/" in target or target.endswith(".md"):
-        p = resolve_target(target, note.path.parent)
-        if p is not None and _exists(p):
-            return True
-        p = resolve_target(target, knowledge_dir())
-        return p is not None and _exists(p)
-    return target in slugs
 
 
 def staged_notes() -> tuple[list[Note], str | None]:
@@ -978,6 +974,8 @@ def stale_reason(note: Note, today: date, days_override: int | None) -> tuple[in
     """(sort key, reason) when the note is a review candidate."""
     if note.type == "task" and note.status == "done":
         return 10 ** 6, "harvest pending (task is done: move lasting results to Knowledge, then delete it)"
+    if note.status and note.status in common.RETIRED_STATUSES.get(note.type, ()):
+        return 10 ** 6, f"retired status '{note.status}' (the note is obsolete: delete it)"
     rule = STALE_RULES.get(note.type)
     if rule is None:
         return None
@@ -1012,7 +1010,7 @@ def cmd_stale(args: argparse.Namespace) -> int:
         return 0
     found.sort(key=lambda x: (-x[0], x[1].rel))
     for _age, n, reason in found:
-        common.out(f"{n.rel}  [{n.type}/{n.status}]  {reason}")
+        common.out(f"{n.rel}  [{n.label}]  {reason}")
     return 0
 
 

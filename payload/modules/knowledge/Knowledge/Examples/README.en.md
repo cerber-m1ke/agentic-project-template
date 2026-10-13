@@ -14,10 +14,11 @@ reference — it is read and copied. Type `example`, lifetime — while the exam
 - A good example already exists in the code — link to the file (for example, from an entity card).
 - The snippet is needed only once.
 
-## Statuses
+## Status and deletion
 
-- `active` — the example matches the accepted approach.
-- `outdated` — no longer matches; name the replacement, or fix the example and set it back to `active`.
+Examples have no status: an example either matches the accepted approach or is fixed in place. If the
+approach changed and the example is not needed, delete the note and link the replacement where the example
+was referenced.
 
 The versions the example applies to go into `applies_to`: `[python@3.12, pytest@8]`.
 

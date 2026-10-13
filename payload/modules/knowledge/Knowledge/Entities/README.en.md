@@ -18,7 +18,8 @@ while the entity exists.
 ## Statuses
 
 - `active` — the entity exists and is in use.
-- `deprecated` — being retired or already retired; name the replacement. Once no links to the card remain, it can be deleted.
+- `deprecated` — being retired but still exists; name the replacement.
+- The entity is retired — delete the card and the links to it; move what matters about the replacement to its card.
 
 ## Name and creation
 

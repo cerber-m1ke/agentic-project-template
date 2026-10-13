@@ -19,14 +19,13 @@ the human decides what to apply. Do not delete anything or change statuses witho
 
 - **Stale** (from `stale`): check each note against Resources the same way as in `kb-lookup`
   (versions against `applies_to`, whether files and functions exist). Correct — update `verified`;
-  wrong — fix it or change the status (`resolved`, `outdated`, `deprecated`, `superseded`).
+  wrong — fix it in place; dead (the cause is fixed, the decision is replaced) — delete it.
+- **Retired statuses** (`superseded`, `resolved`, `outdated`, `dropped`; `lint` and `stale` show them): delete the note.
 - **Finished tasks** (`done`, "harvest pending"): distribute "Takeaways for Knowledge" to Decisions,
   Gotchas, Entities, Examples and delete the task.
 - **Stalled tasks** (`active`/`blocked` without updates): ask the human about their status.
-- **Plans** `idea`/`ready`: are they still relevant — to `ready`, to a task, or to `dropped` with a reason.
+- **Plans** `idea`/`ready`: are they still relevant — to `ready`, to a task, or delete (record an important reason in a decision).
 - **Decisions** `proposed` for more than 30 days: accept or delete — the human decides.
-- **Superseded decisions that are still linked to:** `Toolbox/tb kb related <path>` shows
-  the backlinks — point them to the new decision.
 - **Duplicates and overlaps:** merge into one note, fix the links.
 - **Notes that duplicate the code,** resource READMEs or git history: cut them down to a link to the source
   plus the non-obvious parts, or delete them.

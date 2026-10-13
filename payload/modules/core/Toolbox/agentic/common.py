@@ -23,14 +23,19 @@ LOCK_PATH = ".agents/agentic.lock"
 LOCAL_PATH = ".agents/local.toml"
 KNOWLEDGE_DIR = "Knowledge"
 
-# Knowledge note types: folder and allowed statuses.
+# Knowledge note types: folder and allowed statuses. Statuses describe only a live note; at the end of
+# its life a note is deleted (git history keeps it). No statuses = the type has no `status` field.
 KNOWLEDGE_TYPES: dict[str, dict[str, Any]] = {
-    "decision": {"folder": "Decisions", "statuses": ("proposed", "accepted", "superseded")},
+    "decision": {"folder": "Decisions", "statuses": ("proposed", "accepted")},
     "entity": {"folder": "Entities", "statuses": ("active", "deprecated")},
-    "example": {"folder": "Examples", "statuses": ("active", "outdated")},
-    "gotcha": {"folder": "Gotchas", "statuses": ("active", "resolved")},
-    "plan": {"folder": "Plans", "statuses": ("idea", "ready", "dropped")},
+    "example": {"folder": "Examples", "statuses": ()},
+    "gotcha": {"folder": "Gotchas", "statuses": ()},
+    "plan": {"folder": "Plans", "statuses": ("idea", "ready")},
     "task": {"folder": "Tasks", "statuses": ("active", "blocked", "done")},
+}
+# Statuses retired in 0.2.0: they marked dead notes, which are deleted now.
+RETIRED_STATUSES: dict[str, tuple[str, ...]] = {
+    "decision": ("superseded",), "example": ("outdated",), "gotcha": ("resolved",), "plan": ("dropped",),
 }
 FOLDER_TO_TYPE = {spec["folder"]: name for name, spec in KNOWLEDGE_TYPES.items()}
 

@@ -13,11 +13,11 @@ to check that the problem still exists. Type `gotcha`, lifetime — while the ca
 - The bug can be fixed in the code right away — fix it; if not now — create a plan in Plans.
 - It is common knowledge from the documentation, or it was a one-off failure.
 
-## Statuses
+## Status and deletion
 
-- `active` — the cause exists, the workaround is needed.
-- `resolved` — the cause is gone (version upgraded, code fixed); record when and how. During review
-  such notes are deleted if they will no longer help anyone.
+Gotchas have no status: a note exists while its cause is alive. Once the cause is gone (version upgraded,
+code fixed), delete the note; when and how it was fixed is visible in git history. If old versions are
+still around, keep the note and narrow `applies_to`.
 
 Always fill in "How to check it still applies" and `applies_to` in the `<name>@<version>` format:
 `[node@22, uv@0.12]`. `Toolbox/tb kb stale` and `kb-review` use them to tell that a note may be outdated.

@@ -2,7 +2,6 @@
 type: gotcha
 title: "{{title}}"
 description: ""
-status: active
 created: {{date}}
 verified: {{date}}
 tags: []

@@ -33,11 +33,12 @@ update it instead of creating a duplicate.
 7. **Entities.** Learned something new about a service, module or data store (relations, invariants,
    owners) — update its card in Entities or create one: `Toolbox/tb kb new entity <slug> --title "…" --description "…"`.
 8. **Re-verified notes.** If you checked a note against Resources during the session and it is correct,
-   set `verified` to today's date. Fix an outdated note or change its status (`resolved`, `outdated`,
-   `deprecated`, `superseded` with `superseded_by`).
+   set `verified` to today's date. Fix an outdated note in place. Offer the human to delete a dead one
+   (the gotcha's cause is fixed, the decision is replaced, the example or entity is no longer needed):
+   Knowledge stores only what is alive, earlier versions are in git history.
 9. **Check.** `Toolbox/tb kb lint`; fix all errors.
 10. **Report to the human:** paths of the notes you created and changed, and what needs their decision
-    (ADRs, task deletion, statuses). Offer to commit via the `kb-commit` skill. Do not commit yourself.
+    (ADRs, note deletion, statuses). Offer to commit via the `kb-commit` skill. Do not commit yourself.
 
 ## Do not record
 

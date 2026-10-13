@@ -2,7 +2,7 @@
 
 Architecture decisions (ADR): why things are done this way and not another. The code shows what was
 done; a decision keeps the context, the rejected alternatives and the consequences. Type `decision`,
-lifetime — permanent.
+lifetime — while the decision is in force.
 
 ## When to create
 
@@ -19,8 +19,14 @@ lifetime — permanent.
 
 - `proposed` — proposed, awaiting a human's decision. The Agent creates decisions only with this status.
 - `accepted` — accepted; set by a human, or by the Agent with the human's explicit consent.
-- `superseded` — replaced by another decision; `superseded_by: Decisions/<slug>.md` and a link to the new decision in the text are required.
 - Delete a rejected proposal; if the reason for rejecting it matters, record it under "Alternatives" of the accepted decision.
+
+## When to delete
+
+- The decision is replaced by another: delete the old one and explain in the new one's "Context" or
+  "Alternatives" what was abandoned and why. The old text remains in git history.
+- The decision is revoked, or its gist is already obvious from the code and the resources' documentation,
+  or nobody will ask "why this way?" about it any more.
 
 ## Name and creation
 

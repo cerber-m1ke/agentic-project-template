@@ -143,12 +143,15 @@ after it is deleted, the next `tb` call restores the environment.
 
 | Type | What it stores | Lifetime |
 |---|---|---|
-| Decisions | Architecture decisions (ADR): context, decision, rejected alternatives, consequences | Permanent; outdated ones are marked `superseded` |
+| Decisions | Architecture decisions (ADR): context, decision, rejected alternatives, consequences | While the decision is in force |
 | Entities | Entity cards: purpose, where it lives in Resources, relations, non-obvious invariants, owners. Not a retelling of the code | While the entity exists |
 | Examples | Reusable examples and templates that are quick to find and apply | While relevant |
 | Gotchas | Pitfalls: symptom, cause, workaround, how to check it still applies (`applies_to: [node@22]`) | While the cause exists |
 | Plans | Ideas, postponed items and things discovered along the way | Until they become a task or are dropped |
 | Tasks | Specification of the current task: goal, details, decisions along the way, progress, takeaways | Until the takeaways are harvested |
+
+Knowledge holds only what is alive: outdated notes are fixed in place, dead ones (a replaced decision,
+a fixed pitfall, a rejected plan) are deleted — git history keeps earlier versions.
 
 Decisions made within a task live in the task and go away with it. Only decisions that outlive the task
 go into Decisions.

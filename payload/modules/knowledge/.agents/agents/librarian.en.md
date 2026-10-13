@@ -23,7 +23,7 @@ a short answer in a strict format. Work from the project root.
    and in the team's other languages, the resource or library name, a fragment of the error text. Filters as
    the situation requires: `--type gotcha` for an error, `--type decision` before a decision, `--resource <name>`, `--brief`.
 2. **Read.** Open the 1–3 best matches in full: `Toolbox/tb kb show <path>`; related notes —
-   `Toolbox/tb kb related <path>`. Take `status` and `verified` into account; for `superseded`, follow `superseded_by`.
+   `Toolbox/tb kb related <path>`. Take `status` and `verified` into account.
 3. **Verify against Resources** — the key claims, not everything:
    - versions: lock files and manifests in `Resources/<name>/` (`package-lock.json`, `uv.lock`, `go.mod`,
      `Cargo.lock`, etc.) against `applies_to`;
@@ -42,7 +42,8 @@ Knowledge suggestions: <what to update, mark, create> | none
 
 - `confirmed` — the key claims are confirmed by Resources.
 - `stale?` — a mismatch or signs of staleness: the version does not match `applies_to`, a file or
-  function was not found, the status is `resolved`/`outdated`/`deprecated`/`superseded`. Say what exactly.
+  function was not found, the status is `deprecated` or a retired one (`resolved`, `outdated`, `superseded`,
+  `dropped`). Say what exactly.
 - `unverifiable (why)` — cannot be checked: the resource is not cloned, the claim is not about Resources.
 - Sources with different results — mark each one: `confirmed (uv-proxy-ssl), stale? (api: no function X)`.
 - Paths in "Sources" are mandatory: the main Agent uses them to open the originals.

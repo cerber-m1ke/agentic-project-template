@@ -6,7 +6,7 @@
 # ///
 """Unit tests of the parts where a mistake loses project data or misleads the user: managed-block
 markers, versions and migrations, update classification, payload files, the secret scanner,
-resource URLs.
+resource URLs, Knowledge note statuses.
 
     TB_ROOT=. payload/modules/core/Toolbox/tb run setup/tests/unit_test.py
 """
@@ -20,6 +20,7 @@ sys.dont_write_bytecode = True
 import os  # noqa: E402
 import tempfile  # noqa: E402
 import unittest  # noqa: E402
+from datetime import date  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 TEMPLATE_ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +29,7 @@ sys.path.insert(0, str(TEMPLATE_ROOT / "payload" / "modules" / "core" / "Toolbox
 
 import installer_lib as il  # noqa: E402
 import update  # noqa: E402
+import kb  # noqa: E402
 import resources  # noqa: E402
 import secret_scan  # noqa: E402
 import update_cmd  # noqa: E402
@@ -212,6 +214,60 @@ class ResourceUrls(unittest.TestCase):
             self.assertTrue(resources.is_local_path(url), url)
         for url in ("git@github.com:org/api.git", "https://github.com/org/api.git", "ssh://git@host/x.git"):
             self.assertFalse(resources.is_local_path(url), url)
+
+
+class NoteStatuses(unittest.TestCase):
+    def lint(self, folder: str, front: str) -> list[tuple[str, str]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            kdir = Path(tmp) / "Knowledge"
+            path = kdir / folder / "note.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(f"---\n{front}title: T\ndescription: D\ncreated: 2026-01-01\n---\n\nBody\n",
+                            encoding="utf-8")
+            note = kb.parse_note(path, kdir)
+            return [(p.level, p.message) for p in kb.lint_note(note, {}, None, date(2026, 10, 1))]
+
+    def test_live_statuses(self):
+        self.assertEqual(self.lint("Decisions", "type: decision\nstatus: accepted\n"), [])
+        self.assertEqual(self.lint("Gotchas", "type: gotcha\n"), [])
+        self.assertEqual(self.lint("Examples", "type: example\n"), [])
+
+    def test_status_required_only_with_statuses(self):
+        self.assertIn(("error", "missing required key 'status'"), self.lint("Plans", "type: plan\n"))
+
+    def test_retired_and_extra_statuses_warn(self):
+        for folder, front in (("Decisions", "type: decision\nstatus: superseded\nsuperseded_by: x.md\n"),
+                              ("Gotchas", "type: gotcha\nstatus: resolved\n"),
+                              ("Gotchas", "type: gotcha\nstatus: active\n"),
+                              ("Plans", "type: plan\nstatus: dropped\n")):
+            problems = self.lint(folder, front)
+            self.assertTrue(problems, front)
+            self.assertEqual({level for level, _ in problems}, {"warning"}, problems)
+
+    def test_unknown_status_is_an_error(self):
+        self.assertEqual(self.lint("Plans", "type: plan\nstatus: wip\n")[0][0], "error")
+
+    def test_migration_drops_active_status(self):
+        migration = TEMPLATE_ROOT / il.MIGRATIONS_DIR / "0.2.0_drop-status-gotcha-example.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = {
+                "Knowledge/Gotchas/a.md": ("---\ntype: gotcha\nstatus: active\ntitle: A\n---\nstatus: active\n",
+                                           "---\ntype: gotcha\ntitle: A\n---\nstatus: active\n"),
+                "Knowledge/Gotchas/b.md": ("---\ntype: gotcha\nstatus: resolved\n---\n",) * 2,
+                "Knowledge/Examples/c.md": ("---\ntype: example\nstatus: \"active\"\n---\n",
+                                            "---\ntype: example\n---\n"),
+                "Knowledge/Plans/d.md": ("---\ntype: plan\nstatus: active\n---\n",) * 2,
+                "Knowledge/_templates/gotcha.md": ("---\ntype: gotcha\nstatus: active\n---\n",
+                                                   "---\ntype: gotcha\n---\n"),
+            }
+            for rel, (before, _after) in files.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(before, encoding="utf-8")
+            for _ in range(2):  # idempotent
+                il.run_migration(migration, root)
+                for rel, (_before, after) in files.items():
+                    self.assertEqual((root / rel).read_text(encoding="utf-8"), after, rel)
 
 
 if __name__ == "__main__":

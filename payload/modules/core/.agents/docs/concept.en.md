@@ -58,12 +58,14 @@ Do not edit the generated `.claude/`, `.codex/`, `.mcp.json`, `CLAUDE.md`: chang
 
 | Type | What it stores |
 |---|---|
-| Decisions | Architecture decisions (ADR), permanent; outdated ones — `superseded` |
+| Decisions | Architecture decisions (ADR), while in force |
 | Entities | Entity cards: purpose, location, relations, invariants, owners |
 | Examples | Reusable examples and templates |
 | Gotchas | Pitfalls: symptom, cause, workaround, how to check it still applies |
 | Plans | Ideas and postponed work |
 | Tasks | Current tasks; after `done`, the takeaways are moved to other types and the task is deleted |
+
+Only what is alive is kept: outdated notes are fixed, dead ones are deleted — git history keeps earlier versions.
 
 Workflow: `tb kb search` → `tb kb show` → check against Resources. Skills: `kb-lookup`, `wrap-up`,
 `kb-commit`, `kb-review`.

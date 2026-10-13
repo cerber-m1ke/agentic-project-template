@@ -8,6 +8,8 @@ regularly (skill `kb-review`).
 ## Rules
 
 - Store only what cannot be recovered from Resources and git history.
+- Only what is alive: fix outdated notes in place, delete dead ones. Earlier versions remain in git history,
+  so there are no statuses like "outdated" or "superseded".
 - One note — one topic. First search for an existing note (`Toolbox/tb kb search`) and update it instead of creating duplicates.
 - Turn relative dates ("yesterday", "next month") into absolute ones: `2026-10-08`.
 - File names: ASCII, lowercase kebab-case: `uv-proxy-ssl.md`. Title and text are in the project language.
@@ -20,12 +22,16 @@ regularly (skill `kb-review`).
 
 | Type | Folder | What it stores | Statuses | Lifetime |
 |---|---|---|---|---|
-| `decision` | [Decisions](Decisions/README.md) | Architecture decisions (ADR): context, decision, alternatives, consequences | `proposed`, `accepted`, `superseded` | Permanent |
+| `decision` | [Decisions](Decisions/README.md) | Architecture decisions (ADR): context, decision, alternatives, consequences | `proposed`, `accepted` | While in force |
 | `entity` | [Entities](Entities/README.md) | Entity card: purpose, where it lives, relationships, non-obvious details, owners | `active`, `deprecated` | While the entity exists |
-| `example` | [Examples](Examples/README.md) | Reusable examples and samples — a reference | `active`, `outdated` | While they are current |
-| `gotcha` | [Gotchas](Gotchas/README.md) | Pitfalls: symptom, cause, workaround, how to check it still applies | `active`, `resolved` | While the cause exists |
-| `plan` | [Plans](Plans/README.md) | Ideas, postponed work, things discovered along the way | `idea`, `ready`, `dropped` | Until it becomes a task or is dropped |
+| `example` | [Examples](Examples/README.md) | Reusable examples and samples — a reference | — | While they are current |
+| `gotcha` | [Gotchas](Gotchas/README.md) | Pitfalls: symptom, cause, workaround, how to check it still applies | — | While the cause exists |
+| `plan` | [Plans](Plans/README.md) | Ideas, postponed work, things discovered along the way | `idea`, `ready` | Until it becomes a task or is dropped |
 | `task` | [Tasks](Tasks/README.md) | The current task: goal, specification, decisions along the way, progress, takeaways | `active`, `blocked`, `done` | Until its takeaways are harvested |
+
+The end of a note's life is its deletion: a superseded decision, a fixed pitfall, an outdated example,
+a rejected plan, the card of a retired entity. Anything important from the deleted note moves to a live one
+(for example, why the previous decision was abandoned goes to "Alternatives" of the new one).
 
 Decisions made within a task live in the task and go away with it. Only decisions that outlive the
 task go to Decisions.
@@ -37,7 +43,7 @@ task go to Decisions.
 type: gotcha               # decision | entity | example | gotcha | plan | task
 title: "uv cannot download Python behind a proxy"
 description: "SSL error in tb setup behind a corporate proxy"   # one line: used to search and to decide whether to open the note
-status: active             # allowed values depend on the type
+# status: active           # gotcha and example have none; for other types values depend on the type
 created: 2026-10-08
 verified: 2026-10-08       # when it was last checked against reality
 tags: [uv, network]
@@ -47,8 +53,7 @@ applies_to: [uv@0.12]      # gotcha and example only: which versions it applies 
 ---
 ```
 
-- `type`, `title`, `description`, `status`, `created` are required.
-- A decision with status `superseded` must have `superseded_by` — the path to the new decision.
+- `type`, `title`, `description`, `created` are required; `status` — for all types except gotcha and example.
 - Keys and enum values are always in English; dates are `YYYY-MM-DD`. `Toolbox/tb kb lint` validates the schema.
 
 ## Lifecycle
@@ -59,10 +64,11 @@ Plans (idea) ──► Tasks (active) ──► done ──► harvest ──►
                             Decisions / Gotchas / Entities / Examples
 ```
 
-Takeaways are harvested by the skill `wrap-up`; a deleted task remains in git history. `Toolbox/tb kb stale`
+Takeaways are harvested by the skill `wrap-up`; a deleted note remains in git history. `Toolbox/tb kb stale`
 suggests re-checking a note when `verified` (or `created`) is older than a threshold: gotcha — 90 days,
 entity and example — 180, plan (`idea`, `ready`) — 60, task (`active`, `blocked`) — 30, decision (`proposed`) — 30.
-A task with status `done` is always listed: its takeaways have not been harvested yet.
+A task with status `done` is always listed: its takeaways have not been harvested yet. So is a note with
+a retired status (`superseded`, `resolved`, `outdated`, `dropped`): it is dead and due for deletion.
 
 ## Commands
 
