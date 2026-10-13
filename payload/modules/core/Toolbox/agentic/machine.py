@@ -1,7 +1,7 @@
 """tb setup — prepare this machine for the project. Idempotent: rerun any time.
 
 uv and Python are already provisioned into Runtime/ by Toolbox/tb before this runs.
-Steps: git config, executable bits, agent adapters, Obsidian (if the module is installed),
+Steps: git config, executable bits, agent adapters, Obsidian (if the module is installed), IDE excludes,
 resources status (and optional clone).
 """
 
@@ -15,6 +15,7 @@ from pathlib import Path
 import adapters
 import agents
 import common
+import ide
 import obsidian
 import resources
 
@@ -22,7 +23,7 @@ GIT_HOOKS_DIR = ".agents/git-hooks"
 
 
 def register(sub: argparse._SubParsersAction) -> None:
-    parser = sub.add_parser("setup", help="set up this machine: git, agents, Obsidian, resources",
+    parser = sub.add_parser("setup", help="set up this machine: git, agents, Obsidian, IDE, resources",
                             description="Prepare this machine for the project (safe to rerun).")
     parser.add_argument("--agents", metavar="A,B",
                         help="adapters to link, comma-separated (default: .agents/local.toml)")
@@ -113,6 +114,11 @@ def cmd_setup(args: argparse.Namespace) -> int:
         _section("obsidian")
         code = obsidian.setup()
         summary.append(("✓", "obsidian vault config") if code == 0 else ("✗", "obsidian (see above)"))
+
+    _section("ide")
+    code = ide.setup()
+    summary.append(("✓", f"ide: {', '.join(ide.EXCLUDED)} excluded from indexing") if code == 0
+                   else ("✗", "ide (see above)"))
 
     _section("resources")
     missing, ok = resources.print_status()

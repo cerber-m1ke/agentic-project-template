@@ -15,7 +15,7 @@ import sys
 
 import common
 
-COMMAND_MODULES = ("kb", "agents", "resources", "machine", "obsidian", "update_cmd", "hook", "secret_scan")
+COMMAND_MODULES = ("kb", "agents", "resources", "machine", "obsidian", "ide", "update_cmd", "hook", "secret_scan")
 
 
 def cmd_version(_args: argparse.Namespace) -> int:

@@ -17,7 +17,7 @@
 | Команда | Назначение |
 |---|---|
 | `tb version` | Версия шаблона, имя, язык и профиль проекта |
-| `tb setup [--agents a,b] [--clone-missing]` | Настройка машины: uv, адаптеры, git, Obsidian, Ресурсы |
+| `tb setup [--agents a,b] [--clone-missing]` | Настройка машины: uv, адаптеры, git, Obsidian, IDE, Ресурсы |
 | `tb kb search <запрос> [--type T] [--status S] [--resource R]` | Поиск в Знаниях |
 | `tb kb show <путь\|slug>`, `tb kb related <путь\|slug>` | Заметка целиком; ссылки и обратные ссылки |
 | `tb kb new <type> <slug> [--title T] [--description D] [--folder]` | Новая заметка из `Knowledge/_templates/` |
@@ -26,6 +26,7 @@
 | `tb agents list\|link\|unlink\|doctor` | Адаптеры агентов на этой машине |
 | `tb resources status\|clone\|add` | Ресурсы: состояние, клонирование, добавление в каталог |
 | `tb obsidian setup` | Конфигурация хранилища Obsidian |
+| `tb ide setup` | IDE не индексируют `Resources/` и `Runtime/`: JetBrains (`.idea/*.iml`), VS Code (`.vscode/settings.json`) |
 | `tb update fetch [--ref vX.Y.Z]` | Скачать свежий (или указанный) релиз шаблона в `Runtime/update/` (дальше — skill `agentic-update`) |
 | `tb hook <name> [--agent A]` | Обработчики хуков; вызываются агентами, не вручную. Никогда не блокируют агента и ничего не скачивают |
 | `tb run <script> [аргументы…]` | Запустить скрипт через uv |

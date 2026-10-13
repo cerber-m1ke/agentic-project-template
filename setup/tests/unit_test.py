@@ -6,7 +6,7 @@
 # ///
 """Unit tests of the parts where a mistake loses project data or misleads the user: managed-block
 markers, versions and migrations, update classification, payload files, the secret scanner,
-resource URLs, Knowledge note statuses.
+resource URLs, Knowledge note statuses, IDE excludes.
 
     TB_ROOT=. payload/modules/core/Toolbox/tb run setup/tests/unit_test.py
 """
@@ -17,6 +17,7 @@ import sys
 
 sys.dont_write_bytecode = True
 
+import json  # noqa: E402
 import os  # noqa: E402
 import tempfile  # noqa: E402
 import unittest  # noqa: E402
@@ -29,6 +30,7 @@ sys.path.insert(0, str(TEMPLATE_ROOT / "payload" / "modules" / "core" / "Toolbox
 
 import installer_lib as il  # noqa: E402
 import update  # noqa: E402
+import ide  # noqa: E402
 import kb  # noqa: E402
 import resources  # noqa: E402
 import secret_scan  # noqa: E402
@@ -268,6 +270,73 @@ class NoteStatuses(unittest.TestCase):
                 il.run_migration(migration, root)
                 for rel, (_before, after) in files.items():
                     self.assertEqual((root / rel).read_text(encoding="utf-8"), after, rel)
+
+
+class IdeExcludes(unittest.TestCase):
+    IML = ('<?xml version="1.0" encoding="UTF-8"?>\n<module type="WEB_MODULE" version="4">\n'
+           '  <component name="NewModuleRootManager">\n    {content}\n'
+           '    <orderEntry type="sourceFolder" forTests="false" />\n  </component>\n</module>\n')
+    MODULES = ('<?xml version="1.0" encoding="UTF-8"?>\n<project version="4">\n'
+               '  <component name="ProjectModuleManager">\n    <modules>\n'
+               '      <module fileurl="file://$PROJECT_DIR$/.idea/demo.iml" filepath="$PROJECT_DIR$/.idea/demo.iml" />\n'
+               '    </modules>\n  </component>\n</project>\n')
+
+    def excludes(self, iml: Path) -> list[str]:
+        return [e.get("url") for e in ide.ET.parse(iml).iter("excludeFolder")]
+
+    def test_new_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "My Project"
+            root.mkdir()
+            self.assertTrue(ide._jetbrains(root))
+            iml = root / ".idea" / "My-Project.iml"
+            self.assertEqual(self.excludes(iml), ["file://$MODULE_DIR$/Resources", "file://$MODULE_DIR$/Runtime"])
+            self.assertEqual(ide._module_files(root), [iml])
+            before = iml.read_text(encoding="utf-8")
+            self.assertTrue(ide._jetbrains(root))
+            self.assertEqual(iml.read_text(encoding="utf-8"), before)
+
+    def run_iml(self, content: str) -> tuple[Path, str]:
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp))
+        root = Path(tmp)
+        (root / ".idea").mkdir()
+        (root / ".idea" / "modules.xml").write_text(self.MODULES, encoding="utf-8")
+        iml = root / ".idea" / "demo.iml"
+        iml.write_text(self.IML.format(content=content), encoding="utf-8")
+        self.assertTrue(ide._jetbrains(root))
+        text = iml.read_text(encoding="utf-8")
+        self.assertTrue(ide._jetbrains(root))
+        self.assertEqual(iml.read_text(encoding="utf-8"), text, "second run changes nothing")
+        return iml, text
+
+    def test_self_closing_content(self):
+        iml, text = self.run_iml('<content url="file://$MODULE_DIR$" />')
+        self.assertEqual(self.excludes(iml), ["file://$MODULE_DIR$/Resources", "file://$MODULE_DIR$/Runtime"])
+        self.assertIn('<orderEntry type="sourceFolder"', text)
+
+    def test_adds_only_missing(self):
+        iml, _ = self.run_iml('<content url="file://$MODULE_DIR$">\n'
+                              '      <excludeFolder url="file://$MODULE_DIR$/Resources" />\n'
+                              '      <excludeFolder url="file://$MODULE_DIR$/node_modules" />\n    </content>')
+        self.assertEqual(sorted(self.excludes(iml)), ["file://$MODULE_DIR$/Resources", "file://$MODULE_DIR$/Runtime",
+                                                      "file://$MODULE_DIR$/node_modules"])
+
+    def test_vscode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = root / ".vscode" / "settings.json"
+            settings.parent.mkdir()
+            settings.write_text('{"editor.tabSize": 2, "search.exclude": {"dist/**": true}}', encoding="utf-8")
+            self.assertTrue(ide._vscode(root))
+            data = json.loads(settings.read_text(encoding="utf-8"))
+            self.assertEqual(data["editor.tabSize"], 2)
+            self.assertEqual(data["search.exclude"], {"dist/**": True, "Resources/**": True, "Runtime/**": True})
+            self.assertEqual(data["files.watcherExclude"], {"Resources/**": True, "Runtime/**": True})
+            jsonc = '{\n  // comment\n  "editor.tabSize": 2,\n}\n'
+            settings.write_text(jsonc, encoding="utf-8")
+            self.assertTrue(ide._vscode(root))
+            self.assertEqual(settings.read_text(encoding="utf-8"), jsonc, "JSONC is left untouched")
 
 
 if __name__ == "__main__":

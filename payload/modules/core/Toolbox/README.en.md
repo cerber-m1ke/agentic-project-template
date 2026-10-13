@@ -17,7 +17,7 @@ in the output are relative to the project root.
 | Command | Purpose |
 |---|---|
 | `tb version` | Template version, project name, language and profile |
-| `tb setup [--agents a,b] [--clone-missing]` | Machine setup: uv, adapters, git, Obsidian, Resources |
+| `tb setup [--agents a,b] [--clone-missing]` | Machine setup: uv, adapters, git, Obsidian, IDE, Resources |
 | `tb kb search <query> [--type T] [--status S] [--resource R]` | Search Knowledge |
 | `tb kb show <path\|slug>`, `tb kb related <path\|slug>` | Full note; links and backlinks |
 | `tb kb new <type> <slug> [--title T] [--description D] [--folder]` | New note from `Knowledge/_templates/` |
@@ -26,6 +26,7 @@ in the output are relative to the project root.
 | `tb agents list\|link\|unlink\|doctor` | Agent adapters on this machine |
 | `tb resources status\|clone\|add` | Resources: status, cloning, adding to the catalog |
 | `tb obsidian setup` | Obsidian vault configuration |
+| `tb ide setup` | IDEs do not index `Resources/` and `Runtime/`: JetBrains (`.idea/*.iml`), VS Code (`.vscode/settings.json`) |
 | `tb update fetch [--ref vX.Y.Z]` | Download a fresh (or the given) template release into `Runtime/update/` (next — skill `agentic-update`) |
 | `tb hook <name> [--agent A]` | Hook handlers; called by agents, not by hand. Never block the agent and never download anything |
 | `tb run <script> [args…]` | Run a script via uv |

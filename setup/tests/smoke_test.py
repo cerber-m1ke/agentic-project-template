@@ -320,6 +320,17 @@ def stage_init(origin: Path, project: Path, env: dict, version: str, commit: str
             ok = False
         R.check(f"adapters: {path} is valid JSON", ok)
     R.check("obsidian: Knowledge/.obsidian created", (project / "Knowledge" / ".obsidian").is_dir())
+    imls = sorted((project / ".idea").glob("*.iml"))
+    R.check("ide: JetBrains module excludes Resources and Runtime",
+            len(imls) == 1 and all(f'url="file://$MODULE_DIR$/{n}"' in read(imls[0]) for n in ("Resources", "Runtime")),
+            f"{imls}")
+    try:
+        vscode = json.loads(read(project / ".vscode" / "settings.json"))
+    except (OSError, json.JSONDecodeError):
+        vscode = {}
+    R.check("ide: VS Code search and watcher exclude Resources and Runtime",
+            all(vscode.get(k, {}).get(f"{n}/**") is True
+                for k in ("search.exclude", "files.watcherExclude") for n in ("Resources", "Runtime")), f"{vscode}")
     return lock
 
 
