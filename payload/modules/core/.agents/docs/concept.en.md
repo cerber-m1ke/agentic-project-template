@@ -68,7 +68,7 @@ Do not edit the generated `.claude/`, `.codex/`, `.mcp.json`, `CLAUDE.md`: chang
 Only what is alive is kept: outdated notes are fixed, dead ones are deleted — git history keeps earlier versions.
 
 Workflow: `tb kb search` → `tb kb show` → check against Resources. Skills: `kb-lookup`, `wrap-up`,
-`kb-commit`, `kb-review`.
+`kb-commit`, `kb-review`, `plan-review`; subagents `librarian`, `kb-auditor`.
 
 ## Agents
 

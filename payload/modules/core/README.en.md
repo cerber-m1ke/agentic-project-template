@@ -45,7 +45,7 @@ committed to git.
   session (skill `wrap-up`) and offers to commit the results.
 - The Agent commits only when you ask.
 - Knowledge is convenient to read and edit in Obsidian: open `Knowledge/` as a vault.
-- Every now and then, ask for a Knowledge review (skill `kb-review`).
+- Every now and then, ask for a review of Knowledge (skill `kb-review`) and plans (skill `plan-review`).
 - To update the project from a fresh template version, ask the Agent: "update the project from the
   template".
 

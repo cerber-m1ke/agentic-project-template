@@ -67,7 +67,7 @@ Agentic Project — рабочая среда, в которой Агент ра
 Хранится только живое: устаревшее исправляют, отжившее удаляют — прежние версии есть в истории git.
 
 Работа: `tb kb search` → `tb kb show` → сверка с Ресурсами. Skills: `kb-lookup`, `wrap-up`, `kb-commit`,
-`kb-review`.
+`kb-review`, `plan-review`; субагенты `librarian`, `kb-auditor`.
 
 ## Агенты
 

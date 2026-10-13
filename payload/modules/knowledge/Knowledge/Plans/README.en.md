@@ -27,7 +27,8 @@ There are no plans in progress or completed — such a plan is deleted:
 - Rejected — delete the plan. If the reason matters, so the idea is not proposed again, record it as
   a decision in Decisions or under "Non-obvious details" of an entity card.
 
-`kb-review` brings plans in `idea` and `ready` older than 60 days up for discussion with the human.
+The `plan-review` skill keeps the backlog tidy: what is done or no longer relevant, duplicates, readiness,
+priorities. `Toolbox/tb kb stale` suggests re-checking plans in `idea` and `ready` older than 60 days.
 
 ## Name and creation
 

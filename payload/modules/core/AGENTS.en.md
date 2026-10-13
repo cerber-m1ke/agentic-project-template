@@ -31,9 +31,9 @@
 1. Start: do not read all of Knowledge; active tasks — `Toolbox/tb kb search --type task --status active --brief`.
 2. Before planning and decisions, on first contact with an entity, on a familiar error — skill `kb-lookup`.
 3. End of a session or stage — skill `wrap-up`.
-4. Periodically — skill `kb-review`.
+4. Periodically — skills `kb-review` (Knowledge) and `plan-review` (plans).
 
-Template skills: `kb-lookup` — search Knowledge; `wrap-up` — session wrap-up; `kb-commit` — commit Knowledge; `kb-review` — review Knowledge; `agentic-update` — update from the template.
+Template skills: `kb-lookup` — search Knowledge; `wrap-up` — session wrap-up; `kb-commit` — commit Knowledge; `kb-review` — review Knowledge; `plan-review` — review plans; `agentic-update` — update from the template.
 
 ## `Toolbox/tb` commands
 

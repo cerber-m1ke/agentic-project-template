@@ -3,7 +3,7 @@
 The project's persistent memory: what the Agent and humans need for the work and what cannot be found
 in Resources or git history. Agents' built-in memory is not used — everything is stored here, under git,
 independent of any particular Agent. Knowledge goes stale and gathers noise quickly, so it is reviewed
-regularly (skill `kb-review`).
+regularly (skills `kb-review` and `plan-review`).
 
 ## Rules
 

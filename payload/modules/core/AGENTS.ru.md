@@ -31,9 +31,9 @@
 1. Старт: Знания целиком не читай; активные задачи — `Toolbox/tb kb search --type task --status active --brief`.
 2. Перед планированием и решениями, при первом касании сущности, при знакомой ошибке — skill `kb-lookup`.
 3. Конец сессии или этапа — skill `wrap-up`.
-4. Периодически — skill `kb-review`.
+4. Периодически — skills `kb-review` (Знания) и `plan-review` (планы).
 
-Skills шаблона: `kb-lookup` — поиск в Знаниях; `wrap-up` — итоги сессии; `kb-commit` — коммит Знаний; `kb-review` — ревью Знаний; `agentic-update` — обновление из шаблона.
+Skills шаблона: `kb-lookup` — поиск в Знаниях; `wrap-up` — итоги сессии; `kb-commit` — коммит Знаний; `kb-review` — ревью Знаний; `plan-review` — ревью планов; `agentic-update` — обновление из шаблона.
 
 ## Команды `Toolbox/tb`
 

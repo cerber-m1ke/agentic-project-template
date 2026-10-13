@@ -1,5 +1,5 @@
 name = "knowledge"
-description = "Knowledge/ vault with note templates, tb kb, the librarian subagent and knowledge skills"
+description = "Knowledge/ vault with note templates, tb kb, the librarian and kb-auditor subagents and knowledge skills"
 required = true
 default = true
 # Note templates belong to the project (edited in Obsidian too); template changes arrive as

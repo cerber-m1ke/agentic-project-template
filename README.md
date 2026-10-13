@@ -162,7 +162,8 @@ Plans (idea) ──► Tasks (active) ──► done ──► сбор итог
 Заметки — Markdown с YAML-frontmatter и относительными ссылками: их одинаково понимают агенты, IDE, GitHub
 и Obsidian. Инструменты: `tb kb search` (BM25 со стеммингом для русского и английского), `tb kb new`,
 `tb kb lint`, `tb kb stale`. Процедуры — skills `kb-lookup` (библиотекарь: найти и проверить ответ),
-`wrap-up` (итоги сессии), `kb-commit` (коммит Знаний), `kb-review` (ревью Знаний).
+`wrap-up` (итоги сессии), `kb-commit` (коммит Знаний), `kb-review` (ревью Знаний: вердикт с доказательством
+по каждой заметке, проверка пачками через субагента `kb-auditor`), `plan-review` (ревью бэклога Plans).
 
 ## Жизненный цикл
 
@@ -185,7 +186,7 @@ Toolbox/tb setup --agents claude,codex   # Windows: Toolbox\tb.cmd setup --agent
 `Runtime/` и подключает нового агента (`--agents`).
 
 **Работа.** На старте сессии Агент читает `AGENTS.md`, перед решениями ищет в Знаниях (`kb-lookup`),
-в конце подводит итоги (`wrap-up`), периодически проводит ревью (`kb-review`). Коммитит только по вашей
+в конце подводит итоги (`wrap-up`), периодически проводит ревью (`kb-review`, `plan-review`). Коммитит только по вашей
 просьбе.
 
 **Обновление.** Попросите Агента обновить проект — сработает skill `agentic-update`. `tb update fetch`

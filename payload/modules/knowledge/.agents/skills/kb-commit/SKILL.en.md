@@ -1,6 +1,6 @@
 ---
 name: kb-commit
-description: Commit changes to Knowledge (Knowledge/) with checks and a bullet-point message. Use only when the human explicitly asks to commit Knowledge or agrees to a commit proposed after wrap-up or kb-review.
+description: Commit changes to Knowledge (Knowledge/) with checks and a bullet-point message. Use only when the human explicitly asks to commit Knowledge or agrees to a commit proposed after wrap-up, kb-review or plan-review.
 ---
 
 # Knowledge commit

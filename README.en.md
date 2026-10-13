@@ -165,7 +165,8 @@ Plans (idea) ──► Tasks (active) ──► done ──► harvest ──►
 Notes are Markdown with YAML frontmatter and relative links: agents, IDEs, GitHub and Obsidian all read
 them the same way. Tools: `tb kb search` (BM25 with stemming for Russian and English), `tb kb new`,
 `tb kb lint`, `tb kb stale`. Procedures are the skills `kb-lookup` (the librarian: find and verify an
-answer), `wrap-up` (session wrap-up), `kb-commit` (commit Knowledge) and `kb-review` (review Knowledge).
+answer), `wrap-up` (session wrap-up), `kb-commit` (commit Knowledge), `kb-review` (review Knowledge: a verdict with
+evidence for every note, checked in batches by the `kb-auditor` subagent) and `plan-review` (review the Plans backlog).
 
 ## Lifecycle
 
@@ -188,7 +189,7 @@ catalog resources are missing (`--clone-missing` clones them). The same command 
 environment after `Runtime/` has been deleted and connects a new agent (`--agents`).
 
 **Work.** At the start of a session the Agent reads `AGENTS.md`, searches Knowledge before making
-decisions (`kb-lookup`), wraps up at the end (`wrap-up`) and periodically runs a review (`kb-review`).
+decisions (`kb-lookup`), wraps up at the end (`wrap-up`) and periodically runs reviews (`kb-review`, `plan-review`).
 It commits only when you ask.
 
 **Update.** Ask the Agent to update the project — the `agentic-update` skill kicks in. `tb update fetch`
