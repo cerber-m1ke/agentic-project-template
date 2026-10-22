@@ -9,9 +9,14 @@
 #   branch      — основная ветка для клонирования (необязательно)
 #   description — одна строка: что это за ресурс
 #   entity      — карточка ресурса в Знаниях, например "Knowledge/Entities/api.md"
+#   agent_settings_reviewed — настройки агентов внутри ресурса (.mcp.json, .claude/settings.json, …),
+#                 которые человек разобрал: `tb resources status` и `tb agents doctor` о них
+#                 больше не предупреждают, о новых — предупреждают (необязательно)
 #
-# Добавлять ресурс удобнее командой:
-#   Toolbox/tb resources add git@github.com:org/api.git --name api --branch main --description "Бэкенд API" --clone
+# Добавлять ресурс и менять поля удобнее командами (комментарии файла сохраняются):
+#   Toolbox/tb resources add git@github.com:org/api.git --name api --branch main --description "Бэкенд API" --entity Knowledge/Entities/api.md --clone
+#   Toolbox/tb resources set api branch=develop description=   # пустое значение удаляет поле
+#   Toolbox/tb resources set api agent_settings_reviewed=.mcp.json,.claude/settings.json
 #
 # Пример:
 #

@@ -28,6 +28,8 @@ a short answer in a strict format. Work from the project root.
    - versions: lock files and manifests in `Resources/<name>/` (`package-lock.json`, `uv.lock`, `go.mod`,
      `Cargo.lock`, etc.) against `applies_to`;
    - the mentioned files, functions, commands and config keys exist (search in `Resources/<name>/`);
+     "not found" only from a search that ignores ignore files (`rg --no-ignore`, `git -C <repository> grep`,
+     nested repositories included), otherwise `unverifiable`;
    - the state of the resources: `Toolbox/tb resources status`.
 4. **Answer** strictly in the format below, without preambles or retelling the process.
 

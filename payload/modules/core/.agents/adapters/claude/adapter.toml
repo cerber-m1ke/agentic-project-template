@@ -33,6 +33,8 @@ events = { session-start = "SessionStart", prompt-submit = "UserPromptSubmit", b
 
 [permissions]
 target = ".claude/settings.json"
+# Project rules from .agents/permissions.toml are added: a [[command]] prefix becomes
+# Bash(<cmd>) and Bash(<cmd> *) under its decision, [claude] rules are copied as is.
 # Read-only tb commands that need no confirmation.
 allow = [
     "Bash(Toolbox/tb kb search *)",

@@ -35,6 +35,7 @@ Principles:
 | `.agents/git-hooks/` | `pre-commit`: `tb kb lint` for Knowledge, secret scan |
 | `.agents/adapters/<agent>/` | Agent adapter manifests |
 | `.agents/mcp.toml` | MCP servers |
+| `.agents/permissions.toml` | Permission rules (deny/ask/allow) for all agents |
 | `Knowledge/` | Knowledge, an Obsidian vault; rules — `Knowledge/README.md` and the folder READMEs |
 | `Resources/` | Resources; rules — `Resources/README.md`, catalog — `Resources/resources.toml` |
 | `Toolbox/` | `tb` / `tb.cmd`, template tools in `agentic/`, project tools; index — `Toolbox/README.md` |
@@ -86,7 +87,8 @@ find the skill in `.agents/skills/` and read its `SKILL.md`. Adapters: `tb agent
   loaded by an agent started in the root — what the project needs moves into `.agents/`
   (`tb resources status` lists them).
 - Commits — on request, with explicit paths, in the format `<scope>: <summary>`; scopes: `knowledge`,
-  `agents`, `toolbox`, `resources`, `agentic`.
+  `agents`, `toolbox`, `resources`, `agentic`. The pre-commit hook (`tb kb lint`, secret scan) is never
+  bypassed: no `--no-verify`, no `git commit-tree`. If it fails, fix the cause.
 
 ## Lifecycle
 

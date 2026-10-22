@@ -1,6 +1,10 @@
 """Claude Code renderer: CLAUDE.md (imports AGENTS.md), .claude/settings.json,
 .claude/agents/<name>.md, .mcp.json.
 
+Permissions: the template's [permissions].allow from adapter.toml plus the project's
+.agents/permissions.toml — a [[command]] prefix becomes `Bash(<cmd>)` and `Bash(<cmd> *)`,
+[claude] rules are copied as is.
+
 Skills are linked per skill by agents.py ([skills] mode = "link" in adapter.toml).
 JSON allows no comments, so only the subagent files carry the "generated" note.
 """
@@ -11,7 +15,22 @@ from typing import Any
 
 import yaml
 
-from adapters import GENERATED_NOTE, Context, dump_json, hook_command, hooks_by_event, tier_value
+from adapters import (DECISIONS, GENERATED_NOTE, Context, dump_json, hook_command, hooks_by_event,
+                      tier_value)
+
+
+def permission_rules(ctx: Context) -> dict[str, list[str]]:
+    """`permissions` of settings.json: deny | ask | allow -> rules, without duplicates."""
+    rules: dict[str, list[str]] = {d: [] for d in DECISIONS}
+    rules["allow"] += [str(x) for x in ctx.section("permissions").get("allow", [])]
+    for rule in ctx.permissions.commands:
+        # Plain join: Claude matches the rule text literally, shell quoting would break it
+        # (`rm -rf '~'`). The loader rejects tokens that need quoting or contain `*`.
+        command = " ".join(rule.prefix)
+        rules[rule.decision] += [f"Bash({command})", f"Bash({command} *)"]
+    for decision, raw in ctx.permissions.claude.items():
+        rules[decision] += raw
+    return {d: list(dict.fromkeys(items)) for d, items in rules.items() if items}
 
 
 def _settings(ctx: Context) -> dict[str, dict[str, Any]]:
@@ -25,9 +44,11 @@ def _settings(ctx: Context) -> dict[str, dict[str, Any]]:
         doc.setdefault("env", {})["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
 
     permissions = ctx.section("permissions")
-    if permissions.get("allow"):
-        doc = docs.setdefault(permissions["target"], {})
-        doc.setdefault("permissions", {})["allow"] = [str(x) for x in permissions["allow"]]
+    rules = permission_rules(ctx)
+    if rules and permissions.get("target"):
+        docs.setdefault(permissions["target"], {})["permissions"] = rules
+    elif rules and (ctx.permissions.commands or ctx.permissions.claude):
+        ctx.warnings.append("adapter.toml has no [permissions] target; .agents/permissions.toml skipped")
 
     hooks = ctx.section("hooks")
     grouped = hooks_by_event(ctx)

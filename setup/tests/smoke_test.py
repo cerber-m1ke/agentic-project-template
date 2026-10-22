@@ -366,6 +366,7 @@ def stage_toolbox(project: Path, env: dict, work: Path) -> None:
             tail(output(res)))
     res = run([*tb, "agents", "doctor"], project, env)
     R.check("tb agents doctor", res.returncode == 0, tail(output(res)))
+    stage_permissions(project, env)
     stage_hook_and_root(project, env, work)
 
     # A resource: local bare repository with one commit.
@@ -384,6 +385,19 @@ def stage_toolbox(project: Path, env: dict, work: Path) -> None:
             and (project / "Resources" / "lib" / "README.md").is_file(), tail(output(res)))
     res = run([*tb, "resources", "status"], project, env)
     R.check("tb resources status", res.returncode == 0 and "lib" in res.stdout, tail(output(res)))
+    # Agent settings inside a resource: reported until marked as reviewed with `tb resources set`.
+    (project / "Resources" / "lib" / ".mcp.json").write_text("{}\n", encoding="utf-8")
+    res = run([*tb, "resources", "status"], project, env)
+    hint = "Toolbox/tb resources set lib agent_settings_reviewed=.mcp.json"
+    R.check("tb resources status: reports unreviewed agent settings with a set hint",
+            res.returncode == 0 and hint in res.stdout, tail(output(res)))
+    res = run([*tb, "resources", "set", "lib", "agent_settings_reviewed=.mcp.json", "description=Library"],
+              project, env)
+    after = run([*tb, "resources", "status"], project, env)
+    R.check("tb resources set: field added, reviewed settings no longer reported",
+            res.returncode == 0 and after.returncode == 0 and ".mcp.json" not in after.stdout
+            and 'agent_settings_reviewed = [".mcp.json"]' in read(project / "Resources" / "resources.toml"),
+            tail(output(res) + output(after)))
     # Adopt from a local working copy whose upstream is unreachable: clone the copy, origin = upstream.
     work_copy, missing = work / "lib-work", (work / "remotes" / "missing.git").as_posix()
     git("clone", "--quiet", str(bare), str(work_copy), cwd=work, env=env)
@@ -403,7 +417,8 @@ def stage_toolbox(project: Path, env: dict, work: Path) -> None:
     il.rmtree(nested)
     draft = project / "Knowledge" / "Plans" / "draft.md"
     draft.write_text("unfinished draft without frontmatter\n", encoding="utf-8")  # untracked: ignored
-    paths = [p for p in (NOTE_PATH, "Resources/resources.toml") if (project / p).is_file()]
+    paths = [p for p in (NOTE_PATH, "Resources/resources.toml", ".agents/permissions.toml")
+             if (project / p).is_file()]
     res = run(["git", "add", "--", *paths], project, env)
     res = run(["git", "commit", "-m", "knowledge: add uv proxy gotcha"], project, env)  # runs pre-commit
     R.check("git commit with pre-commit hook (kb lint --staged, secrets scan); untracked draft ignored",
@@ -411,6 +426,28 @@ def stage_toolbox(project: Path, env: dict, work: Path) -> None:
     stage_precommit_blocks(project, env, draft)
     R.require("git: clean tree before update", git("status", "--porcelain", cwd=project, env=env) == "",
               git("status", "--porcelain", cwd=project, env=env)[:300])
+
+
+def stage_permissions(project: Path, env: dict) -> None:
+    """.agents/permissions.toml -> Claude settings.json permissions and Codex Starlark rules."""
+    tb = tb_cmd(project)
+    perms = project / ".agents" / "permissions.toml"
+    R.check("init: .agents/permissions.toml seeded", perms.is_file())
+    perms.write_text(read(perms) + '\n[[command]]\nprefix = ["git", "push", "--force"]\ndecision = "deny"\n'
+                     'reason = "smoke"\n\n[claude]\ndeny = ["Read(./secrets/**)"]\n', encoding="utf-8")
+    res = run([*tb, "agents", "link"], project, env)
+    try:
+        claude = json.loads(read(project / ".claude" / "settings.json")).get("permissions", {})
+    except json.JSONDecodeError:
+        claude = {}
+    rules = read(project / ".codex" / "rules" / "project.rules")
+    R.check("tb agents link: permissions.toml -> Claude permissions + Codex rules, [claude] skipped for Codex",
+            res.returncode == 0 and "Bash(git push --force *)" in claude.get("deny", [])
+            and "Read(./secrets/**)" in claude.get("deny", []) and "Bash(Toolbox/tb version)" in claude.get("allow", [])
+            and 'pattern = ["git", "push", "--force"]' in rules and 'decision = "forbidden"' in rules
+            and "[claude]" in output(res), tail(output(res)))
+    res = run([*tb, "agents", "doctor"], project, env)
+    R.check("tb agents doctor: permission rules up to date", res.returncode == 0, tail(output(res)))
 
 
 def stage_hook_and_root(project: Path, env: dict, work: Path) -> None:

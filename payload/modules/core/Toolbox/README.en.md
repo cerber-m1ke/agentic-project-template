@@ -22,9 +22,10 @@ in the output are relative to the project root.
 | `tb kb show <path\|slug>`, `tb kb related <path\|slug>` | Full note; links and backlinks |
 | `tb kb new <type> <slug> [--title T] [--description D] [--folder]` | New note from `Knowledge/_templates/` |
 | `tb kb index [--base DIR]`, `tb kb lint [--staged]`, `tb kb stale` | Index; validation of Knowledge and `AGENTS.md` (`--staged` — what goes into the commit); candidates for re-verification |
+| `tb kb verify [--date YYYY-MM-DD] [--dry-run] <path\|slug>…` | Mark notes as verified: `verified` = today (or `--date`), then lint them |
 | `tb secrets scan [--staged] [paths…]` | Secret scan |
 | `tb agents list\|link\|unlink\|doctor` | Agent adapters on this machine |
-| `tb resources status\|clone\|add` | Resources: status, cloning, adding to the catalog |
+| `tb resources status\|clone\|add\|set` | Resources: status, cloning, adding and editing catalog entries |
 | `tb obsidian setup` | Obsidian vault configuration |
 | `tb ide setup` | IDEs do not index `Resources/` and `Runtime/`: JetBrains (`.idea/*.iml`), VS Code (`.vscode/settings.json`) |
 | `tb update fetch [--ref vX.Y.Z]` | Download a fresh (or the given) template release into `Runtime/update/` (next — skill `agentic-update`) |

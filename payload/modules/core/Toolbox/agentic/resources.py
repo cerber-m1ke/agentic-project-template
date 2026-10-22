@@ -1,8 +1,8 @@
 """tb resources — catalog of the project's resources (Resources/resources.toml) and their clones.
 
 Each `[[resource]]` has `name` (directory in Resources/), `kind` (git | folder), `url`,
-optional `branch`, `description`, `entity`. Git resources are cloned into Resources/<name>/,
-which the root repository ignores.
+optional `branch`, `description`, `entity`, `agent_settings_reviewed`. Git resources are cloned
+into Resources/<name>/, which the root repository ignores.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import argparse
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -28,12 +29,17 @@ _DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 AGENT_CONFIGS = (".claude/settings.json", ".claude/settings.local.json", ".claude/skills",
                  ".claude/commands", ".claude/agents", ".mcp.json", ".codex/config.toml",
                  ".codex/hooks.json", ".codex/agents", ".agents/skills")
+# Catalog fields `tb resources set` may change (`name` is the key and stays).
+FIELDS = ("kind", "url", "branch", "description", "entity", "agent_settings_reviewed")
+REVIEWED = "agent_settings_reviewed"   # AGENT_CONFIGS paths the human has reviewed
+_HEADER_RE = re.compile(r"^\s*\[\[?\s*[^\[\]=]+?\s*\]\]?\s*(?:#.*)?$")
+_RESOURCE_HEADER_RE = re.compile(r"^\s*\[\[\s*resource\s*\]\]\s*(?:#.*)?$")
 
 
 # --- CLI --------------------------------------------------------------------------------
 
 def register(sub: argparse._SubParsersAction) -> None:
-    parser = sub.add_parser("resources", help="project resources: status | clone | add",
+    parser = sub.add_parser("resources", help="project resources: status | clone | add | set",
                             description=f"Resources catalogued in {CATALOG}.")
     actions = parser.add_subparsers(dest="resources_action", metavar="<action>")
     actions.add_parser("status", help="catalog entries: cloned?, branch, changes") \
@@ -51,8 +57,17 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--branch", help="branch to clone")
     p.add_argument("--kind", choices=KINDS, default="git", help="git (default) or folder")
     p.add_argument("--description", help="what the resource is")
+    p.add_argument("--entity", help="the resource's card in Knowledge, e.g. Knowledge/Entities/api.md")
     p.add_argument("--clone", action="store_true", help="clone it right away (git only)")
     p.set_defaults(func=cmd_add)
+    p = actions.add_parser("set", help=f"change fields of a resource in {CATALOG}",
+                           description=f"Set or remove fields of a [[resource]] in {CATALOG}, keeping "
+                                       "the rest of the file (comments included) as is. "
+                                       f"Fields: {', '.join(FIELDS)}. `field=` (empty) removes the "
+                                       f"field; {REVIEWED} takes a comma-separated list.")
+    p.add_argument("name", help="resource name (not changed by this command)")
+    p.add_argument("assignments", nargs="+", metavar="field=value")
+    p.set_defaults(func=cmd_set)
     parser.set_defaults(func=lambda _args: (parser.print_help(), 0)[1])
 
 
@@ -71,7 +86,11 @@ def cmd_clone(args: argparse.Namespace) -> int:
 
 def cmd_add(args: argparse.Namespace) -> int:
     return add(args.url, name=args.name, branch=args.branch, kind=args.kind,
-               description=args.description, do_clone=args.clone)
+               description=args.description, entity=args.entity, do_clone=args.clone)
+
+
+def cmd_set(args: argparse.Namespace) -> int:
+    return set_fields(args.name, args.assignments)
 
 
 # --- catalog ---------------------------------------------------------------------------------
@@ -93,6 +112,10 @@ def load_catalog() -> tuple[list[dict[str, Any]], str | None]:
             continue
         if item.get("kind", "git") not in KINDS:
             common.warn(f"{CATALOG}: {name}: unknown kind {item.get('kind')!r} (git | folder)")
+        reviewed = item.get(REVIEWED, [])
+        if not (isinstance(reviewed, list) and all(isinstance(x, str) for x in reviewed)):
+            common.warn(f"{CATALOG}: {name}: `{REVIEWED}` must be a list of paths; ignored")
+            item = {k: v for k, v in item.items() if k != REVIEWED}
         entries.append(item)
     return entries, None
 
@@ -129,6 +152,57 @@ def agent_configs(path: Path) -> list[str]:
     return [name for name in AGENT_CONFIGS if (path / name).exists()]
 
 
+def _norm_config(path: str) -> str:
+    return path.replace("\\", "/").strip().strip("/")
+
+
+def reviewed_configs(entry: dict[str, Any] | None) -> list[str]:
+    """`agent_settings_reviewed` of a catalog entry, normalized."""
+    value = (entry or {}).get(REVIEWED, [])
+    return [_norm_config(x) for x in value if isinstance(x, str)] if isinstance(value, list) else []
+
+
+def unreviewed_agent_configs(entries: list[dict[str, Any]]) -> list[tuple[str, list[str], str]]:
+    """Resource folders whose agent settings are not all marked as reviewed in the catalog:
+    (folder name, unreviewed paths, hint to mark the present ones as reviewed — "" if the folder
+    is not in the catalog)."""
+    base = common.project_root() / RESOURCES_DIR
+    if not base.is_dir():
+        return []
+    by_name = {entry["name"].lower(): entry for entry in entries}
+    result: list[tuple[str, list[str], str]] = []
+    for path in sorted(base.iterdir()):
+        if not path.is_dir() or path.name.startswith("."):
+            continue
+        found = agent_configs(path)
+        entry = by_name.get(path.name.lower())
+        reviewed = reviewed_configs(entry)
+        new = [name for name in found if name not in reviewed]
+        if not new:
+            continue
+        hint = ""
+        if entry is not None:
+            marked = list(dict.fromkeys(reviewed + found))
+            hint = f"Toolbox/tb resources set {entry['name']} {REVIEWED}={','.join(marked)}"
+        result.append((path.name, new, hint))
+    return result
+
+
+def agent_settings_lines(entries: list[dict[str, Any]]) -> list[str]:
+    """Report lines about unreviewed agent settings inside resources (empty: nothing to report)."""
+    found = unreviewed_agent_configs(entries)
+    if not found:
+        return []
+    lines = ["Agent settings inside resources are NOT loaded by an agent started in the project root "
+             "(hooks, permissions, MCP, skills): "
+             + "; ".join(f"{RESOURCES_DIR}/{name}/ ({', '.join(new)})" for name, new, _ in found),
+             "  Move what the project needs into .agents/ (permissions.toml, mcp.toml, skills/, "
+             "hooks/hooks.toml), or start the agent inside the resource for resource-only work.",
+             "  Reviewed? Mark them so that only new ones are reported:"]
+    lines += [f"    {hint}" for _, _, hint in found if hint]
+    return lines
+
+
 def print_status() -> tuple[list[str], bool]:
     """Print the status table. Returns (missing git resources, catalog readable)."""
     entries, error = load_catalog()
@@ -139,7 +213,6 @@ def print_status() -> tuple[list[str], bool]:
     missing: list[str] = []
     rows: list[tuple[str, ...]] = []
     local_urls: list[str] = []
-    foreign_configs: list[str] = []
     for entry in entries:
         name, kind = entry["name"], entry.get("kind", "git")
         path = _resource_dir(name)
@@ -161,10 +234,6 @@ def print_status() -> tuple[list[str], bool]:
             rows.append((name, kind, "present", "", ""))
         if kind == "git" and is_local_path(str(entry.get("url") or "")):
             local_urls.append(name)
-        if path.is_dir():
-            configs = agent_configs(path)
-            if configs:
-                foreign_configs.append(f"{RESOURCES_DIR}/{name}/ ({', '.join(configs)})")
 
     if not (root / CATALOG).is_file():
         common.out(f"No catalog: {CATALOG} not found.")
@@ -190,11 +259,8 @@ def print_status() -> tuple[list[str], bool]:
     if local_urls:
         common.out(f"Local-path url (works only on this machine; use the upstream URL): "
                    f"{', '.join(local_urls)}")
-    if foreign_configs:
-        common.out("Agent settings inside resources are NOT loaded by an agent started in the project "
-                   "root (hooks, permissions, MCP, skills): " + "; ".join(foreign_configs))
-        common.out("  Move what the project needs into .agents/ (mcp.toml, skills/, hooks/hooks.toml), "
-                   "or start the agent inside the resource for resource-only work.")
+    for line in agent_settings_lines(entries):
+        common.out(line)
     return missing, True
 
 
@@ -311,8 +377,14 @@ def _upstream_of_local(path: Path) -> tuple[str | None, str]:
     return upstream, ""
 
 
+def _check_entity(entity: str) -> None:
+    if not (common.project_root() / entity).is_file():
+        common.warn(f"entity {entity!r} does not exist yet — create the card, e.g. "
+                    "Toolbox/tb kb new entity <slug> --title \"…\"")
+
+
 def add(url: str, name: str | None = None, branch: str | None = None, kind: str = "git",
-        description: str | None = None, do_clone: bool = False) -> int:
+        description: str | None = None, entity: str | None = None, do_clone: bool = False) -> int:
     local_copy: Path | None = None
     if kind == "git" and is_local_path(url):
         local = Path(url.removeprefix("file://"))
@@ -341,6 +413,8 @@ def add(url: str, name: str | None = None, branch: str | None = None, kind: str 
         lines.append(_toml_line("branch", branch))
     if description:
         lines.append(_toml_line("description", description))
+    if entity:
+        lines.append(_toml_line("entity", entity))
 
     path = common.project_root() / CATALOG
     existed = path.is_file()
@@ -360,6 +434,8 @@ def add(url: str, name: str | None = None, branch: str | None = None, kind: str 
             path.unlink()
         return common.fail(f"{CATALOG} would become invalid ({exc}); left unchanged")
     common.out(f"Added {name!r} to {CATALOG}.")
+    if entity:
+        _check_entity(entity)
     if kind == "folder":
         common.out(f"Note: folder resources are not versioned by the project: {RESOURCES_DIR}/{name}/ "
                    "exists only on this machine and `tb resources clone` cannot restore it. Record "
@@ -376,4 +452,160 @@ def add(url: str, name: str | None = None, branch: str | None = None, kind: str 
         return code
     if kind == "git":
         common.out(f"Clone it: Toolbox/tb resources clone {name}")
+    return 0
+
+
+# --- set ------------------------------------------------------------------------------------
+
+def _value_extent(lines: list[str], start: int) -> int:
+    """Index after the last line of the key/value pair starting at `start` (multi-line arrays and
+    strings included); -1 if it never parses."""
+    for end in range(start + 1, len(lines) + 1):
+        try:
+            tomllib.loads("\n".join(lines[start:end]))
+            return end
+        except tomllib.TOMLDecodeError:
+            continue
+    return -1
+
+
+def _resource_blocks(lines: list[str]) -> list[tuple[int, int, dict[str, tuple[int, int]]]] | None:
+    """Every [[resource]] table in the text: (header line, end of its last pair, top-level key ->
+    (first line, end)). None if a pair cannot be delimited."""
+    blocks: list[tuple[int, int, dict[str, tuple[int, int]]]] = []
+    i = 0
+    while i < len(lines):
+        if not _RESOURCE_HEADER_RE.match(lines[i]):
+            i += 1
+            continue
+        header, keys, last = i, {}, i + 1
+        i += 1
+        while i < len(lines):
+            stripped = lines[i].strip()
+            if not stripped or stripped.startswith("#"):
+                i += 1
+                continue
+            if _HEADER_RE.match(lines[i]):
+                break
+            end = _value_extent(lines, i)
+            if end < 0:
+                return None
+            key = next(iter(tomllib.loads("\n".join(lines[i:end]))), None)
+            if key is not None:
+                keys.setdefault(key, (i, end))
+            i, last = end, end
+        blocks.append((header, last, keys))
+    return blocks
+
+
+def _trailing_comment(line: str) -> str:
+    """The `# comment` that ends a one-line pair (with the spaces before it), or ""."""
+    for pos in [m.start() for m in re.finditer("#", line)]:
+        try:
+            tomllib.loads(line[:pos])
+        except tomllib.TOMLDecodeError:
+            continue
+        head = line[:pos]
+        return line[len(head.rstrip()):]
+    return ""
+
+
+def _toml_kv(key: str, value: Any) -> str:
+    """One-line `key = value` (a list of strings stays on one line)."""
+    if isinstance(value, list):
+        items = (common.dump_toml({"v": str(x)}).strip()[len("v = "):] for x in value)
+        return f"{key} = [{', '.join(items)}]"
+    return common.dump_toml({key: value}).strip()
+
+
+def _field_value(key: str, raw: str) -> tuple[Any, str]:
+    """Parsed value of `key=raw` and an error ("" if fine). An empty raw value removes the field."""
+    if raw == "":
+        return None, ""
+    if key == REVIEWED:
+        items = [_norm_config(x) for x in raw.split(",") if x.strip()]
+        unknown = [x for x in items if x not in AGENT_CONFIGS]
+        if unknown:
+            common.warn(f"{REVIEWED}: {', '.join(unknown)} — not among the reported paths "
+                        f"({', '.join(AGENT_CONFIGS)})")
+        return list(dict.fromkeys(items)), ""
+    if key == "kind" and raw not in KINDS:
+        return None, f"kind must be one of: {', '.join(KINDS)}"
+    return raw, ""
+
+
+def set_fields(name: str, assignments: list[str]) -> int:
+    """Set (or, with an empty value, remove) fields of one catalog entry, editing only its lines."""
+    changes: dict[str, Any] = {}
+    for item in assignments:
+        key, sep, raw = item.partition("=")
+        key = key.strip()
+        if not sep:
+            return common.fail(f"{item!r}: expected field=value (an empty value removes the field)")
+        if key == "name":
+            return common.fail("`name` is the resource's key and cannot be changed with set")
+        if key not in FIELDS:
+            return common.fail(f"unknown field {key!r} (fields: {', '.join(FIELDS)})")
+        if key in changes:
+            return common.fail(f"field {key!r} given twice")
+        value, error = _field_value(key, raw.strip())
+        if error:
+            return common.fail(error)
+        changes[key] = value
+
+    path = common.project_root() / CATALOG
+    if not path.is_file():
+        return common.fail(f"{CATALOG} not found")
+    original = common.read_text(path)
+    try:
+        data = tomllib.loads(original)
+    except tomllib.TOMLDecodeError as exc:
+        return common.fail(f"{CATALOG}: {exc}")
+    raw_entries = data.get("resource", [])
+    index = next((i for i, e in enumerate(raw_entries) if isinstance(e, dict) and e.get("name") == name),
+                 None)
+    if index is None:
+        names = [str(e.get("name")) for e in raw_entries if isinstance(e, dict)]
+        return common.fail(f"unknown resource {name!r} (catalog: {', '.join(names) or 'empty'})")
+
+    lines = common.normalize_newlines(original).split("\n")
+    blocks = _resource_blocks(lines)
+    if blocks is None or len(blocks) != len(raw_entries):
+        return common.fail(f"{CATALOG}: cannot locate the [[resource]] tables in the text; edit it by hand")
+    header, last, keys = blocks[index]
+    edits: list[tuple[int, int, list[str]]] = []   # (start, end, replacement lines)
+    appended: list[str] = []
+    for key, value in changes.items():
+        new_line = None if value is None else _toml_kv(key, value)
+        if key in keys:
+            start, end = keys[key]
+            comment = _trailing_comment(lines[start]) if end - start == 1 else ""
+            edits.append((start, end, [] if new_line is None else [new_line + comment]))
+        elif new_line is not None:
+            appended.append(new_line)
+    if appended:
+        edits.append((last, last, appended))
+    for start, end, replacement in sorted(edits, key=lambda e: e[0], reverse=True):
+        lines[start:end] = replacement
+    text = "\n".join(lines)
+
+    expected = {k: v for k, v in raw_entries[index].items() if k not in changes}
+    expected.update({k: v for k, v in changes.items() if v is not None})
+    try:
+        result = tomllib.loads(text).get("resource", [])
+        ok = (len(result) == len(raw_entries) and result[index] == expected
+              and all(result[i] == raw_entries[i] for i in range(len(raw_entries)) if i != index))
+        error = "the edit changed more than the requested fields"
+    except tomllib.TOMLDecodeError as exc:
+        ok, error = False, str(exc)
+    if not ok:
+        return common.fail(f"{CATALOG} would become invalid ({error}); left unchanged")
+    if text == common.normalize_newlines(original):
+        common.out(f"{name}: nothing to change in {CATALOG}.")
+        return 0
+    common.write_text(path, text)
+    for key, value in changes.items():
+        common.out(f"{name}: {'removed ' + key if value is None else _toml_kv(key, value)}")
+    if changes.get("entity"):
+        _check_entity(changes["entity"])
     return 0

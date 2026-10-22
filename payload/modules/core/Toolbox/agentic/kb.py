@@ -6,8 +6,10 @@ import argparse
 import math
 import os
 import re
+import subprocess
 import urllib.parse
 from collections import Counter, defaultdict
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -28,7 +30,14 @@ WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10
 REQUIRED_KEYS = ("type", "title", "description", "created")  # + `status` for types that have statuses
 LIST_KEYS = ("tags", "aliases", "resources", "applies_to")
 TEMPLATES_DIR = "_templates"
-AGENTS_TOKEN_BUDGET = 1500
+CATALOG = "Resources/resources.toml"
+PENDING_TITLE = "pending"  # [text](path.md "pending"): a link whose target is not written yet
+# AGENTS.md is loaded into every session. Lint checks only what the project controls: the part outside
+# the template block (the whole file when it has no markers). The block's size is the template's job
+# (AGENTS_BLOCK_BUDGET, checked by the template's tests).
+AGENTS_TOKEN_BUDGET = 1500    # whole file without a template block
+AGENTS_PROJECT_BUDGET = 800   # project part, outside <!-- agentic:begin --> … <!-- agentic:end -->
+AGENTS_BLOCK_BUDGET = 900     # template block with the longest profile
 
 # Search: BM25 over weighted fields (a simple BM25F).
 FIELD_WEIGHTS = {"title": 3.0, "aliases": 3.0, "tags": 2.0, "description": 2.0, "body": 1.0}
@@ -51,7 +60,7 @@ _CYRILLIC_RE = re.compile(r"[\u0400-\u04ff]")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _LINK_RE = re.compile(
     r"(!?)\[((?:[^\[\]\n]|\[[^\]\n]*\])*)\]\(\s*(<[^>\n]*>|[^)\s]+)"
-    r"(?:\s+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^)\n]*\)))?\s*\)")
+    r"(?:\s+(\"[^\"\n]*\"|'[^'\n]*'|\([^)\n]*\)))?\s*\)")  # group 4: title with its delimiters
 _WIKILINK_RE = re.compile(r"(?<!!)\[\[[^\]\n]+\]\]")
 _FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 _INLINE_CODE_RE = re.compile(r"(`+)[^`\n]*?\1")
@@ -78,6 +87,7 @@ class Link:
     path: Path           # normalized absolute target path (fragment removed)
     exists: bool
     image: bool
+    pending: bool = False  # title "pending": the target is to be written later
 
 
 @dataclass
@@ -139,13 +149,12 @@ class Note:
             return []
         return v if isinstance(v, list) else [v]
 
+    def resource_refs(self) -> list[tuple[str, str]]:
+        """(name, subpath) of each `resources` entry; subpath "" = the whole resource."""
+        return [ref for ref in map(resource_ref, self.list_field("resources")) if ref]
+
     def resource_names(self) -> list[str]:
-        names = []
-        for item in self.list_field("resources"):
-            name = resource_name(item)
-            if name:
-                names.append(name)
-        return names
+        return list(dict.fromkeys(name for name, _sub in self.resource_refs()))
 
     @property
     def code_free_lines(self) -> list[str]:
@@ -161,13 +170,31 @@ class Note:
         return self._links
 
 
-def resource_name(item: Any) -> str | None:
-    """Resource reference in frontmatter: "name", "name@branch" or {name: …, branch: …}."""
+def resource_ref(item: Any) -> tuple[str, str] | None:
+    """Resource reference in frontmatter: "name", "name/sub/path", either with "@branch", or
+    {name: …, branch: …}. Returns (name, subpath); subpath "" means the whole resource.
+    The resource name is everything before the first "/" (a branch may contain "/" itself)."""
     if isinstance(item, dict):
         item = item.get("name")
-    if isinstance(item, str) and item.strip():
-        return item.strip().split("@", 1)[0].strip()
-    return None
+    if not (isinstance(item, str) and item.strip()):
+        return None
+    name, _, sub = item.strip().split("@", 1)[0].strip().replace("\\", "/").partition("/")
+    sub = "/".join(p for p in sub.split("/") if p not in ("", "."))
+    return (name.strip(), sub) if name.strip() else None
+
+
+def resource_name(item: Any) -> str | None:
+    ref = resource_ref(item)
+    return ref[0] if ref else None
+
+
+def resource_matches(note: Note, wanted: str) -> bool:
+    """`--resource X` matches X and every X/…; `--resource X/sub` matches X/sub and X/sub/…."""
+    want = resource_ref(wanted)
+    if want is None:
+        return False
+    name, sub = want
+    return any(n == name and (not sub or s == sub or s.startswith(sub + "/")) for n, s in note.resource_refs())
 
 
 def knowledge_dir() -> Path:
@@ -249,12 +276,35 @@ def load_notes(warn_missing: bool = True) -> list[Note]:
 
 class IndexSnapshot:
     """File existence as of the git index (what the next commit contains), for `lint --staged`.
-    Paths outside the project or under Resources/ (not in the root repository) use the disk."""
+    Paths outside the project or under Resources/ (not in the root repository) use the disk.
+    A target present on disk but not staged is only a warning (parallel sessions in one tree
+    commit their notes separately), unless git ignores it: then it never gets committed."""
 
     def __init__(self, root: Path, paths: set[str]) -> None:
         self.root = root
         self.files = paths
         self.dirs = {"/".join(p.split("/")[:i]) for p in paths for i in range(1, p.count("/") + 1)}
+        self.ignored: set[str] = set()
+
+    def unstaged_on_disk(self, path: Path) -> bool:
+        """In the root repository, present on disk, absent from the index."""
+        rel = self._rel(path)
+        return rel is not None and not self.exists(path) and path.exists()
+
+    def load_ignored(self, paths: Collection[Path]) -> None:
+        """Mark which of `paths` git ignores: one `git check-ignore --stdin` call for all of them."""
+        rels = sorted({rel for p in paths if (rel := self._rel(p)) is not None} - self.ignored)
+        if not rels:
+            return
+        res = subprocess.run(["git", "check-ignore", "--stdin", "-z"], cwd=self.root,
+                             input="".join(f"{r}\0" for r in rels).encode("utf-8"), capture_output=True)
+        if res.returncode not in (0, 1):  # 1: none of them is ignored
+            raise RuntimeError(res.stderr.decode("utf-8", errors="replace").strip() or "git check-ignore failed")
+        self.ignored |= {p.rstrip("/") for p in res.stdout.decode("utf-8").split("\0") if p}
+
+    def is_ignored(self, path: Path) -> bool:
+        rel = self._rel(path)
+        return rel is not None and rel in self.ignored
 
     def _rel(self, path: Path) -> str | None:
         rel = os.path.relpath(os.path.normpath(path), self.root).replace(os.sep, "/")
@@ -326,8 +376,10 @@ def extract_links(lines: list[str], path: Path, offset: int = 0) -> list[Link]:
         for m in _LINK_RE.finditer(line):
             resolved = resolve_target(m.group(3), path.parent)
             if resolved is not None:
+                title = m.group(4)[1:-1].strip() if m.group(4) else ""
                 links.append(Link(line=offset + i, target=m.group(3), path=resolved,
-                                  exists=_exists(resolved), image=bool(m.group(1))))
+                                  exists=_exists(resolved), image=bool(m.group(1)),
+                                  pending=title.lower() == PENDING_TITLE))
     return links
 
 
@@ -488,7 +540,7 @@ def run_search(query: str, notes: list[Note], *, types: set[str] | None = None,
     def accept(note: Note) -> bool:
         return ((types is None or note.type in types)
                 and (statuses is None or note.status in statuses)
-                and (resource is None or resource in note.resource_names()))
+                and (resource is None or resource_matches(note, resource)))
 
     if not query.strip():
         listed = sorted((n for n in notes if accept(n)), key=lambda n: n.rel)
@@ -595,7 +647,8 @@ def cmd_related(args: argparse.Namespace) -> int:
         if k in seen:
             continue
         seen.add(k)
-        outgoing.append(describe(link.path) + ("" if link.exists else "  [broken]"))
+        mark = "  [pending]" if link.pending else ("" if link.exists else "  [broken]")
+        outgoing.append(describe(link.path) + mark)
     backlinks = sorted({n.rel: n for n in notes if n.path != note.path
                         and any(_key(l.path) == key for l in n.links)}.values(), key=lambda n: n.rel)
 
@@ -754,21 +807,93 @@ def estimate_tokens(text: str) -> int:
     return round(ascii_chars / 4 + (len(text) - ascii_chars) / 2.5)
 
 
-def load_resource_names(problems: list[Problem], text: str | None = None) -> set[str] | None:
-    """Resource names of the catalog (from disk, or from `text`, e.g. its staged content)."""
+def split_agents(text: str) -> tuple[str, str | None]:
+    """(project part, template block) of AGENTS.md; the block is None without a marker pair."""
+    lines = common.normalize_newlines(text).split("\n")
+    begin = next((i for i, line in enumerate(lines) if common.MARKER_RE["begin"].match(line)), None)
+    end = None if begin is None else next(
+        (j for j in range(begin + 1, len(lines)) if common.MARKER_RE["end"].match(lines[j])), None)
+    if begin is None or end is None:
+        return text, None
+    return "\n".join(lines[:begin] + lines[end + 1:]), "\n".join(lines[begin + 1:end])
+
+
+def agents_budget_problem(text: str) -> Problem | None:
+    """Warning when the part of AGENTS.md the project controls is over its budget."""
+    project, block = split_agents(text)
+    tokens = estimate_tokens(project)
+    advice = "it is loaded into every session; move details to Knowledge/ or skills"
+    if block is None:
+        if tokens > AGENTS_TOKEN_BUDGET:
+            return Problem("AGENTS.md", None, "warning",
+                           f"~{tokens} tokens, above the {AGENTS_TOKEN_BUDGET}-token budget ({advice})")
+        return None
+    if tokens > AGENTS_PROJECT_BUDGET:
+        return Problem("AGENTS.md", None, "warning",
+                       f"project part (outside the agentic block) ~{tokens} tokens, above the "
+                       f"{AGENTS_PROJECT_BUDGET}-token budget; the template block (~{estimate_tokens(block)} "
+                       f"tokens) is not counted ({advice})")
+    return None
+
+
+def load_catalog(problems: list[Problem], text: str | None = None) -> dict[str, dict] | None:
+    """Catalog entries by resource name (from disk, or from `text`, e.g. its staged content);
+    None when there is no catalog or it is invalid."""
     import tomllib
 
-    path = common.project_root() / "Resources" / "resources.toml"
+    path = common.project_root() / CATALOG
     if text is None and not path.is_file():
         return None
     try:
         data = common.load_toml(path) if text is None else tomllib.loads(text)
     except Exception as exc:
-        problems.append(Problem(common.rel(path), None, "error", f"invalid TOML: {exc}"))
+        problems.append(Problem(CATALOG, None, "error", f"invalid TOML: {exc}"))
         return None
     items = data.get("resource", [])
-    return {str(r["name"]) for r in items if isinstance(r, dict) and r.get("name")} \
-        if isinstance(items, list) else set()
+    return {str(r["name"]): r for r in items if isinstance(r, dict) and r.get("name")} \
+        if isinstance(items, list) else {}
+
+
+def _catalog_line(text: str | None, name: str, key: str) -> int | None:
+    """Line of `key = …` inside the [[resource]] named `name` (best effort, for messages)."""
+    if text is None:
+        return None
+    current = None
+    for i, line in enumerate(text.split("\n"), start=1):
+        s = line.strip()
+        if s.startswith("[[resource]]"):
+            current = None
+        elif m := re.match(r"name\s*=\s*[\"']([^\"']*)[\"']", s):
+            current = m.group(1)
+        elif current == name and re.match(rf"{key}\s*=", s):
+            return i
+    return None
+
+
+def check_catalog_entities(catalog: dict[str, dict], text: str | None) -> list[Problem]:
+    """`entity` of every catalog entry must point to an existing file (relative to the project root)."""
+    problems: list[Problem] = []
+    root = common.project_root()
+    for name, entry in catalog.items():
+        entity = entry.get("entity")
+        if entity in (None, ""):
+            continue
+        line = _catalog_line(text, name, "entity")
+        if not isinstance(entity, str):
+            problems.append(Problem(CATALOG, line, "error", f"resource '{name}': 'entity' must be a string"))
+            continue
+        path = Path(os.path.normpath(root / entity.strip().replace("\\", "/")))
+        if _exists(path) and not _is_dir(path):
+            continue
+        if _snapshot is not None and path.is_file() and not _snapshot.is_ignored(path):
+            problems.append(Problem(CATALOG, line, "warning", f"resource '{name}': entity is not staged yet "
+                                    f"(commit it together or later): {entity}"))
+        elif _snapshot is not None and _snapshot.is_ignored(path):
+            problems.append(Problem(CATALOG, line, "error", f"resource '{name}': entity is ignored by git "
+                                    f"(never committed): {entity}"))
+        else:
+            problems.append(Problem(CATALOG, line, "error", f"resource '{name}': entity file not found: {entity}"))
+    return problems
 
 
 def check_name(note: Note) -> list[str]:
@@ -786,8 +911,55 @@ def check_name(note: Note) -> list[str]:
     return msgs
 
 
-def lint_note(note: Note, slugs: dict[str, list[Note]], resource_names: set[str] | None,
-              today: date) -> list[Problem]:
+def entity_cards(notes: list[Note]) -> dict[str, list[str]]:
+    """Resource name -> Entities notes listing the whole resource (no subpath) in `resources`."""
+    cards: dict[str, list[str]] = defaultdict(list)
+    for n in notes:
+        if n.folder == "Entities":
+            for name in dict.fromkeys(name for name, sub in n.resource_refs() if not sub):
+                cards[name].append(n.rel)
+    return cards
+
+
+def _catalog_entities(catalog: Collection[str] | None) -> set[str]:
+    """`entity` paths already set in the catalog (normalized like Note.rel)."""
+    if not isinstance(catalog, dict):
+        return set()
+    return {os.path.normpath(e["entity"].strip().replace("\\", "/")).replace(os.sep, "/")
+            for e in catalog.values() if isinstance(e, dict) and isinstance(e.get("entity"), str)}
+
+
+def lint_resources(note: Note, catalog: Collection[str] | None, err, warn,
+                   cards: dict[str, list[str]] | None = None) -> None:
+    """`resources` entries: known to the catalog, an existing subpath in a cloned resource and,
+    for the resource's own entity card, a hint to fill the catalog's `entity`. `catalog`: names, or
+    entries by name. The card is the one named after the resource or the only one listing it (`cards`)."""
+    resources_dir = common.project_root() / "Resources"
+    for item in note.list_field("resources"):
+        ref = resource_ref(item)
+        if ref is None or ".." in ref[1].split("/"):
+            if catalog is not None:
+                err(f"invalid 'resources' entry: {item!r}")
+            continue
+        name, sub = ref
+        if catalog is not None and name not in catalog:
+            err(f"unknown resource '{name}' (not in {CATALOG})")
+            continue
+        if sub and (resources_dir / name).is_dir() and not (resources_dir / name / sub).exists():
+            warn(f"resource path not found: {name}/{sub} (no Resources/{name}/{sub} in the clone)")
+        entry = catalog.get(name) if isinstance(catalog, dict) else None
+        own_card = note.slug.lower() == name.lower() or (cards or {}).get(name) == [note.rel]
+        if isinstance(entry, dict) and not sub and note.folder == "Entities" and not entry.get("entity") \
+                and own_card and note.rel not in _catalog_entities(catalog):
+            warn(f"resource '{name}' has no 'entity'; set it: Toolbox/tb resources set {name} entity={note.rel}")
+
+
+def lint_note(note: Note, slugs: dict[str, list[Note]], resource_names: Collection[str] | None,
+              today: date, cards: dict[str, list[str]] | None = None) -> list[Problem]:
+    """`resource_names`: catalog names, or catalog entries by name (enables the `entity` hint).
+    `cards`: entity_cards() of all notes; computed from `slugs` when omitted."""
+    if cards is None:
+        cards = entity_cards([n for group in slugs.values() for n in group])
     problems: list[Problem] = []
 
     def err(msg: str, line: int | None = None) -> None:
@@ -859,16 +1031,16 @@ def lint_note(note: Note, slugs: dict[str, list[Note]], resource_names: set[str]
         if meta.get("superseded_by") not in (None, "", []):
             warn("'superseded_by' is retired: delete the superseded decision and explain the change "
                  "in the new one")
-        if resource_names is not None:
-            for item in note.list_field("resources"):
-                name = resource_name(item)
-                if name is None:
-                    err(f"invalid 'resources' entry: {item!r}")
-                elif name not in resource_names:
-                    err(f"unknown resource '{name}' (not in Resources/resources.toml)")
+        lint_resources(note, resource_names, err, warn, cards)
 
     resources_dir = common.project_root() / "Resources"
     for link in note.links:
+        if link.pending:
+            if link.exists:
+                warn(f'pending link target now exists: remove the "pending" title ({link.target})', link.line)
+            else:
+                warn(f"pending link: {link.target}", link.line)
+            continue
         if link.exists:
             continue
         try:
@@ -879,6 +1051,12 @@ def lint_note(note: Note, slugs: dict[str, list[Note]], resource_names: set[str]
             if (resources_dir / inside[0]).is_dir():
                 warn(f"link to a missing file in resource '{inside[0]}': {link.target}", link.line)
             continue  # resource not cloned on this machine
+        if _snapshot is not None and link.path.exists():
+            if _snapshot.is_ignored(link.path):
+                err(f"broken link: {link.target} (ignored by git, never committed)", link.line)
+            else:
+                warn(f"link target is not staged yet (commit it together or later): {link.target}", link.line)
+            continue
         err(f"broken link: {link.target}", link.line)
     for i, line in enumerate(note.code_free_lines if "[[" in note.body else [], start=1):
         if _WIKILINK_RE.search(line):
@@ -898,34 +1076,63 @@ def staged_notes() -> tuple[list[Note], str | None]:
     _snapshot = IndexSnapshot(root, paths)
     prefix = common.KNOWLEDGE_DIR + "/"
     wanted = sorted(p for p in paths if p.startswith(prefix) and is_note_parts(tuple(p[len(prefix):].split("/"))))
-    catalog = "Resources/resources.toml"
-    blobs = secret_scan._staged_blobs(root, wanted + ([catalog] if catalog in paths else []))
+    blobs = secret_scan._staged_blobs(root, wanted + ([CATALOG] if CATALOG in paths else []))
     notes = [parse_note(root / p, kdir, tuple(p[len(prefix):].split("/")), data=blobs.get(p, b""))
              for p in wanted]
-    text = blobs[catalog].decode("utf-8", errors="replace") if catalog in blobs else None
+    text = blobs[CATALOG].decode("utf-8", errors="replace") if CATALOG in blobs else None
     return notes, text
 
 
 def run_lint(staged: bool = False) -> tuple[list[Problem], int]:
     """Lint the Knowledge base on disk, or (staged) exactly what the next commit contains:
     untracked or unstaged drafts neither block a commit nor hide a broken staged note."""
+    global _snapshot
+    try:
+        return _run_lint(staged)
+    finally:
+        _snapshot = None
+
+
+def _slugs(notes: list[Note]) -> dict[str, list[Note]]:
+    slugs: dict[str, list[Note]] = defaultdict(list)
+    for n in notes:
+        slugs[n.slug].append(n)
+    return slugs
+
+
+def _load_ignored(notes: list[Note], catalog: dict[str, dict] | None) -> None:
+    """Ask git once which unstaged link and entity targets it ignores (`lint --staged`)."""
+    assert _snapshot is not None
+    root = common.project_root()
+    paths = [link.path for n in notes for link in n.links if not link.pending]
+    for entry in (catalog or {}).values():
+        if isinstance(entry.get("entity"), str) and entry["entity"].strip():
+            paths.append(Path(os.path.normpath(root / entry["entity"].strip().replace("\\", "/"))))
+    _snapshot.load_ignored([p for p in paths if _snapshot.unstaged_on_disk(p)])
+
+
+def _run_lint(staged: bool) -> tuple[list[Problem], int]:
     root = common.project_root()
     kdir = knowledge_dir()
     problems: list[Problem] = []
     if staged:
         notes, catalog_text = staged_notes()
-        resource_names = load_resource_names(problems, catalog_text) if catalog_text is not None else None
+        catalog = load_catalog(problems, catalog_text) if catalog_text is not None else None
     else:
         notes = load_notes(warn_missing=False)
         if not kdir.is_dir():
             problems.append(Problem(common.KNOWLEDGE_DIR + "/", None, "warning", "directory not found"))
-        resource_names = load_resource_names(problems)
-    slugs: dict[str, list[Note]] = defaultdict(list)
-    for n in notes:
-        slugs[n.slug].append(n)
+        catalog_path = root / CATALOG
+        catalog_text = common.read_text(catalog_path) if catalog_path.is_file() else None
+        catalog = load_catalog(problems)
+    if staged and _snapshot is not None:
+        _load_ignored(notes, catalog)
+    if catalog:
+        problems.extend(check_catalog_entities(catalog, catalog_text))
+    slugs, cards = _slugs(notes), entity_cards(notes)
     today = date.today()
     for n in notes:
-        problems.extend(lint_note(n, slugs, resource_names, today))
+        problems.extend(lint_note(n, slugs, catalog, today, cards))
     if staged:  # secrets of staged files: `tb secrets scan --staged` (pre-commit runs both)
         problems.sort(key=lambda p: (p.path, p.line or 0))
         return problems, len(notes)
@@ -935,12 +1142,8 @@ def run_lint(staged: bool = False) -> tuple[list[Problem], int]:
         for f in findings:
             problems.append(Problem(f.path, f.line, "error", f"possible secret: {f.kind} {f.masked}"))
     agents = root / "AGENTS.md"
-    if agents.is_file():
-        tokens = estimate_tokens(common.read_text(agents))
-        if tokens > AGENTS_TOKEN_BUDGET:
-            problems.append(Problem("AGENTS.md", None, "warning",
-                                    f"~{tokens} tokens, above the {AGENTS_TOKEN_BUDGET}-token budget "
-                                    "(it is loaded into every session; move details to Knowledge/ or skills)"))
+    if agents.is_file() and (problem := agents_budget_problem(common.read_text(agents))):
+        problems.append(problem)
     problems.sort(key=lambda p: (p.path, p.line or 0))
     return problems, len(notes)
 
@@ -966,6 +1169,125 @@ def cmd_lint(args: argparse.Namespace) -> int:
     elif problems:
         common.out(summary)
     return 1 if errors else 0
+
+
+# --- verify ---------------------------------------------------------------------------------------------------------
+
+_RAW_FM_RE = re.compile(r"\A(\ufeff?---[ \t]*\r?\n)(.*?\r?\n)?(---[ \t]*(?:\r?\n|\Z))", re.DOTALL)
+def _last_line(node: yaml.Node) -> int:
+    """0-based line of the last character of a composed YAML node."""
+    if isinstance(node, yaml.SequenceNode) and not node.flow_style and node.value:
+        return _last_line(node.value[-1])
+    if isinstance(node, yaml.MappingNode) and not node.flow_style and node.value:
+        return _last_line(node.value[-1][1])
+    end = node.end_mark
+    return end.line if end.column > 0 or end.line == node.start_mark.line else end.line - 1
+
+
+def set_verified(text: str, day: str) -> str | None:
+    """`text` with `verified: <day>` in its frontmatter: replaces the top-level `verified` entry (keeping
+    a trailing comment of a one-line value) or inserts one after `created` (else at the end). Every other
+    byte is kept. None when the file has no frontmatter. ValueError when the result would not parse to
+    the same frontmatter with only `verified` changed: the file is then left to a human."""
+    m = _RAW_FM_RE.match(text)
+    if not m:
+        return None
+    front = m.group(2) or ""
+    lines = front.splitlines(keepends=True)
+    eol = "\r\n" if (lines[0] if lines else m.group(1)).endswith("\r\n") else "\n"
+    try:
+        old = yaml.load(front, Loader=_YAML_LOADER) or {}
+        root = yaml.compose(front)
+    except Exception as exc:
+        raise ValueError(f"invalid YAML frontmatter: {exc}") from exc
+    if not isinstance(old, dict) or not (root is None or isinstance(root, yaml.MappingNode)):
+        raise ValueError("frontmatter is not a mapping")
+    keys = [k.value for k, _v in (root.value if root else []) if isinstance(k, yaml.ScalarNode)]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate frontmatter keys")
+    pairs = {k.value: (k, v) for k, v in (root.value if root else []) if isinstance(k, yaml.ScalarNode)}
+    if "verified" in pairs:
+        key, value = pairs["verified"]
+        first, last = key.start_mark.line, _last_line(value)
+        tail = ""
+        if first == last:  # keep a trailing comment
+            line = lines[first].rstrip("\r\n")
+            tail = line[value.end_mark.column:] if value.end_mark.line == first else ""
+            tail = tail if not tail.strip() or tail.lstrip().startswith("#") else ""
+        lines[first:last + 1] = [f"verified: {day}{tail.rstrip()}{eol}"]
+    else:
+        at = _last_line(pairs["created"][1]) + 1 if "created" in pairs else len(lines)
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += eol
+        lines.insert(at, f"verified: {day}{eol}")
+    result = "".join(lines)
+    try:
+        new = yaml.load(result, Loader=_YAML_LOADER) or {}
+    except Exception as exc:
+        raise ValueError(f"the edit breaks the frontmatter: {exc}") from exc
+    rest = {k: v for k, v in old.items() if k != "verified"}
+    if (not isinstance(new, dict) or new.get("verified") != date.fromisoformat(day)
+            or {k: v for k, v in new.items() if k != "verified"} != rest):
+        raise ValueError("the edit changes other frontmatter keys")
+    return m.group(1) + result + text[m.start(3):]
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    day = args.date or common.today_iso()
+    if not _DATE_RE.match(day) or as_date(day) is None:
+        return common.fail(f"--date must be YYYY-MM-DD: {day}", 2)
+    notes = load_notes()
+    by_key = {_key(n.path): n for n in notes}
+    kdir = knowledge_dir()
+    failed, checked, seen = 0, [], set()
+    for ref in dict.fromkeys(args.refs):
+        path, _code = _find_note(ref, notes)
+        if path is None:
+            failed += 1
+            continue
+        if _key(path) in seen:  # the same note by slug and by path
+            continue
+        seen.add(_key(path))
+        note = by_key.get(_key(path))
+        if note is None:
+            failed += 1
+            common.fail(f"not a note: {common.rel(path)}")
+            continue
+        try:
+            raw = path.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            failed += 1
+            common.fail(f"cannot read {note.rel}: {exc}")
+            continue
+        try:
+            new = set_verified(raw, day)
+        except ValueError:
+            failed += 1
+            common.fail(f"cannot update 'verified' safely in {note.rel}; edit it by hand")
+            continue
+        if new is None:
+            failed += 1
+            common.fail(f"{note.rel}: no YAML frontmatter")
+            continue
+        if new != raw and not args.dry_run:
+            path.write_bytes(new.encode("utf-8"))
+        verb = "would set" if args.dry_run else "set"
+        common.out(f"{note.rel}: {verb} verified: {day}" if new != raw else f"{note.rel}: verified: {day} already")
+        checked.append(parse_note(path, kdir, note.parts, data=new.encode("utf-8")))
+    if checked:
+        problems: list[Problem] = []
+        catalog = load_catalog(problems)
+        done = {_key(c.path) for c in checked}
+        current = [n for n in notes if _key(n.path) not in done] + checked
+        slugs, cards = _slugs(current), entity_cards(current)
+        problems += [p for n in checked for p in lint_note(n, slugs, catalog, date.today(), cards)]
+        for p in problems:
+            common.out(p.format())
+        errors = sum(1 for p in problems if p.level == "error")
+        failed += errors
+        common.out(f"{_plural(errors, 'error')}, {_plural(len(problems) - errors, 'warning')} "
+                   f"({_plural(len(checked), 'note')} checked)")
+    return 1 if failed else 0
 
 
 # --- stale ----------------------------------------------------------------------------------------------------------
@@ -996,6 +1318,20 @@ def stale_reason(note: Note, today: date, days_override: int | None) -> tuple[in
     return age, f"created {age} days ago, never verified (threshold {threshold})"
 
 
+def pending_reason(note: Note) -> str | None:
+    """Pending links make a note a candidate for completion."""
+    pending = [link for link in note.links if link.pending]
+    if not pending:
+        return None
+    ready = sum(1 for link in pending if link.exists)
+    parts = []
+    if missing := len(pending) - ready:
+        parts.append(f"{_plural(missing, 'pending link')} (write the target or drop the link)")
+    if ready:
+        parts.append(f'{_plural(ready, "pending link")} with an existing target (remove the "pending" title)')
+    return "; ".join(parts)
+
+
 def cmd_stale(args: argparse.Namespace) -> int:
     if args.days is not None and args.days < 0:
         return common.fail("--days must be >= 0")
@@ -1003,8 +1339,11 @@ def cmd_stale(args: argparse.Namespace) -> int:
     found = []
     for n in load_notes():
         r = stale_reason(n, today, args.days)
-        if r:
-            found.append((r[0], n, r[1]))
+        reasons = [r[1]] if r else []
+        if pending := pending_reason(n):
+            reasons.append(pending)
+        if reasons:
+            found.append((r[0] if r else 0, n, "; ".join(reasons)))
     if not found:
         common.out("No stale notes.")
         return 0
@@ -1024,7 +1363,7 @@ def register(sub) -> None:
     q.add_argument("query", nargs="*", help="search words (omit to list notes matching the filters)")
     q.add_argument("--type", help="filter by type (comma-separated)")
     q.add_argument("--status", help="filter by status (comma-separated)")
-    q.add_argument("--resource", help="filter by resource name")
+    q.add_argument("--resource", help="filter by resource: NAME (also NAME/…) or NAME/SUBPATH")
     q.add_argument("--limit", type=int, help="max results (default 10; all when listing by filters)")
     q.add_argument("--brief", action="store_true", help="no snippet lines")
     q.add_argument("--json", action="store_true", help="JSON output")
@@ -1059,7 +1398,13 @@ def register(sub) -> None:
                     help="lint the notes as staged in git (pre-commit): ignores unstaged and untracked edits")
     li.set_defaults(func=cmd_lint)
 
-    st = s.add_parser("stale", help="notes due for review")
+    v = s.add_parser("verify", help="set `verified` to today in notes checked against reality, then lint them")
+    v.add_argument("refs", nargs="+", metavar="ref", help="path or slug")
+    v.add_argument("--date", metavar="YYYY-MM-DD", help="date to set (default: today)")
+    v.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
+    v.set_defaults(func=cmd_verify)
+
+    st = s.add_parser("stale", help="notes due for review (old `verified`, pending links)")
     st.add_argument("--days", type=int, help="use this threshold (days) for every type")
     st.set_defaults(func=cmd_stale)
 

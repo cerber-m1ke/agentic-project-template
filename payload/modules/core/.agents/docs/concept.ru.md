@@ -34,6 +34,7 @@ Agentic Project — рабочая среда, в которой Агент ра
 | `.agents/git-hooks/` | `pre-commit`: `tb kb lint` для Знаний, поиск секретов |
 | `.agents/adapters/<agent>/` | Манифесты адаптеров агентов |
 | `.agents/mcp.toml` | MCP-серверы |
+| `.agents/permissions.toml` | Правила разрешений (deny/ask/allow) для всех агентов |
 | `Knowledge/` | Знания, хранилище Obsidian; правила — `Knowledge/README.md` и README папок |
 | `Resources/` | Ресурсы; правила — `Resources/README.md`, каталог — `Resources/resources.toml` |
 | `Toolbox/` | `tb` / `tb.cmd`, инструменты шаблона в `agentic/`, инструменты проекта; индекс — `Toolbox/README.md` |
@@ -85,7 +86,8 @@ Agentic Project — рабочая среда, в которой Агент ра
   запущенный из корня, не загружает — нужное проекту переносится в `.agents/` (`tb resources status`
   их перечисляет).
 - Коммиты — по просьбе, явными путями, формат `<scope>: <суть>`; scopes: `knowledge`, `agents`,
-  `toolbox`, `resources`, `agentic`.
+  `toolbox`, `resources`, `agentic`. Хук pre-commit (`tb kb lint`, поиск секретов) не обходят: ни
+  `--no-verify`, ни `git commit-tree`. Упал — исправь причину.
 
 ## Жизненный цикл
 

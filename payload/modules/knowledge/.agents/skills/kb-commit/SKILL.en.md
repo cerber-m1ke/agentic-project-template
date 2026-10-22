@@ -28,8 +28,12 @@ separately, with their own scope and also only on request.
 6. **Confirmation.** Show the human the file list and the message, and wait for their approval.
 7. **Stage explicit paths:** `git add -- Knowledge/Gotchas/uv-proxy-ssl.md Knowledge/Tasks/auth-token-refresh.md`.
    Deleted files are staged the same way. Never `git add -A`, `git add .`, `git commit -a`.
-   Make sure `git diff --cached --name-only` shows only these paths.
+   Make sure `git diff --cached --name-only` shows only these paths, and check what the hook will see:
+   `Toolbox/tb kb lint --staged`. A `not staged yet` warning is a link to a note outside the commit, broken
+   in history: include that note in the commit (with the human's consent) or make the link
+   `[text](path.md "pending")`.
 8. **Commit.** Write the message to `Runtime/commit-msg.txt` and run `git commit -F Runtime/commit-msg.txt`,
-   then delete the file. The pre-commit hook repeats `kb lint` and the secret scan: if it fails, fix the cause;
-   do not use `--no-verify`.
+   then delete the file. The pre-commit hook repeats `kb lint --staged` and the secret scan: if it fails, fix
+   the cause. Never bypass the hook — no `--no-verify`, no `git commit-tree`, no disabling it: it catches
+   secrets.
 9. **Report:** the commit hash (`git log -1 --oneline`) and the file list.

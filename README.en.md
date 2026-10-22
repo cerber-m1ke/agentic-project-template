@@ -109,6 +109,7 @@ The template URL is saved in `.agents/agentic.lock` — the project is updated f
 │   ├── git-hooks/            # git hooks (pre-commit: kb lint, secret scan)
 │   ├── adapters/<agent>/     # adapter manifests
 │   ├── mcp.toml              # canonical MCP server definitions
+│   ├── permissions.toml      # permission rules (deny/ask/allow) for all agents
 │   └── docs/                 # concept and reference, read on demand
 ├── Knowledge/                # Obsidian vault
 │   ├── README.md             # general Knowledge rules

@@ -91,7 +91,8 @@ Toolbox/tb run Runtime/update/<v>/setup/update.py apply --project . --yes [--tak
 1. Внеси согласованные правки `seeded`-файлов и перенеси локальные правки (если так решили). Добавлен
    или удалён модуль — `Toolbox/tb setup`.
 2. `Toolbox/tb kb lint` — исправь ошибки; нетривиальные исправления покажи человеку.
-3. `Toolbox/tb agents link` — пересоздать адаптеры.
+3. `Toolbox/tb agents link` — пересоздать адаптеры. На машине ещё нет `.agents/local.toml` (свежий клон) —
+   сначала `Toolbox/tb setup --agents <claude,codex>`, иначе link ответит «no agents selected».
 4. `Toolbox/tb agents doctor`.
 
 ## 7. Отчёт, коммит, слияние
@@ -123,5 +124,6 @@ Toolbox/tb run Runtime/update/<v>/setup/update.py apply --project . --yes [--tak
 - **После коммита, до слияния:** `git switch <исходная ветка>`, `git branch -D agentic/update-<версия>`.
 - **После слияния:** `git revert <коммит обновления>` и коммит отката.
 
-Затем `Toolbox/tb agents link` и `Toolbox/tb agents doctor`. `agentic.lock` откатывается вместе с файлами,
+Затем `Toolbox/tb agents link` (без `.agents/local.toml` — `Toolbox/tb setup --agents <…>`, §6) и
+`Toolbox/tb agents doctor`. `agentic.lock` откатывается вместе с файлами,
 поэтому обновление можно повторить позже.

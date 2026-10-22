@@ -9,9 +9,14 @@
 #   branch      — main branch to clone (optional)
 #   description — one line: what this resource is
 #   entity      — the resource's card in Knowledge, e.g. "Knowledge/Entities/api.md"
+#   agent_settings_reviewed — agent settings inside the resource (.mcp.json, .claude/settings.json, …)
+#                 the human has reviewed: `tb resources status` and `tb agents doctor` no longer
+#                 warn about them, new ones are still reported (optional)
 #
-# Adding a resource is easier with the command:
-#   Toolbox/tb resources add git@github.com:org/api.git --name api --branch main --description "Backend API" --clone
+# Adding a resource and changing fields is easier with the commands (comments in this file are kept):
+#   Toolbox/tb resources add git@github.com:org/api.git --name api --branch main --description "Backend API" --entity Knowledge/Entities/api.md --clone
+#   Toolbox/tb resources set api branch=develop description=   # an empty value removes the field
+#   Toolbox/tb resources set api agent_settings_reviewed=.mcp.json,.claude/settings.json
 #
 # Example:
 #

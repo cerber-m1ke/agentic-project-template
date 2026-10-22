@@ -31,8 +31,8 @@ Exactly one verdict per note:
 
 | Verdict | When | Action |
 |---|---|---|
-| `keep` | Key claims are confirmed | `verified` = today |
-| `fix` | The topic is alive, but facts are wrong (paths, versions, commands, relations) | Fix in place, `verified` = today |
+| `keep` | Key claims are confirmed | `Toolbox/tb kb verify <path>` (`verified` = today) |
+| `fix` | The topic is alive, but facts are wrong (paths, versions, commands, relations) | Fix in place, then `tb kb verify` |
 | `shrink` | Retells the code, a resource README, git history | Keep a link to the source and the non-obvious parts |
 | `merge` | Overlaps with another note | Merge into one, redirect links |
 | `delete` | Dead (see the criteria), a retired status, a `done` task after harvesting | Move what matters to a live note, delete, remove links |
@@ -42,13 +42,19 @@ Exactly one verdict per note:
 
 A verdict without evidence is not allowed. Evidence is something the human can check themselves:
 
-- a file, function or key found or not found: `Resources/<name>/<path>:<line>` or a search command
-  with an empty result;
+- a file, function or key found: `Resources/<name>/<path>:<line>`;
+- not found — a search command with an empty result, by the rule below;
 - a version from a lock file or manifest against `applies_to`;
 - a commit: `git -C Resources/<name> log --oneline -S '<string>'`, `git log --oneline -- <path>` —
   when it was fixed, deleted, a branch merged;
 - the result of the "How to check it still applies" check (without side effects);
 - the path of another note — for `merge`, and for `delete` when replaced.
+
+A negative claim ("not in the code", "unused", "removed") is proven only by a search that ignores
+ignore files, across all affected repositories, including those nested in a resource:
+`rg --no-ignore '<string>' Resources/<name>` or `git -C Resources/<name>/<nested> grep '<string>'`
+in each repository. An empty result of an ordinary search (the agent's Grep, `rg` or `grep` from the root) is not
+evidence: it may not see `Resources/` and nested repositories (`Resources/README.md`).
 
 "Looks like", "probably", "not updated for a long time" do not count as evidence: in such cases the verdict
 is `ask`. If the resource is not cloned, it is also `ask`, not `delete`.
@@ -77,16 +83,22 @@ is `ask`. If the resource is not cloned, it is also `ask`, not `delete`.
 1. **Collect.** `Toolbox/tb kb lint`, `Toolbox/tb kb stale`, `Toolbox/tb kb index --json`,
    `Toolbox/tb resources status` (Windows PowerShell: `Toolbox\tb.cmd …`). List the notes in scope.
 2. **Batches.** Split the notes into batches of 5–8, one resource per batch where possible, so a subagent
-   reads one resource. Notes without a resource go into a separate batch.
+   reads one resource. Group notes with `<resource>/<subpath>` in `resources` by module: one batch per module.
+   Notes without a resource go into a separate batch.
 3. **Check.** If your agent can launch subagents and `kb-auditor` is available, run it on every batch
    in parallel, all calls in one message. Pass the note paths, today's date and the scope. If there are no
    subagents or fewer than six notes, check them yourself by the same criteria and in the `kb-auditor` format.
-4. **Consolidate.** Collect the verdicts and check yourself what a batch cannot see: overlaps between
-   batches, links to notes with `delete` and `merge`. Recheck a verdict with weak evidence or turn it into `ask`.
+   Large scope (more than ~30 notes): also pass every `kb-auditor` a report path
+   `Runtime/kb-review/<YYYY-MM-DD>/<batch>.md`. It writes the full report there and replies with a summary
+   of at most 10 lines.
+4. **Consolidate.** Collect the verdicts (for a large scope — from the report files, not the replies) and
+   check yourself what a batch cannot see: overlaps between batches, links to notes with `delete` and `merge`.
+   Recheck a verdict with weak evidence or turn it into `ask`.
 5. **Report.** Show the human the report in the format below. For `delete` and `merge`, say what
    moves where. Wait for confirmation.
 6. **Apply** only what was confirmed, in this order: move what matters → `merge` → `fix`/`shrink` →
-   `delete` → fix links → `verified`.
+   `delete` → fix links → `Toolbox/tb kb verify <paths>` for `keep` and `fix` (do not edit `verified`
+   by hand).
 7. **Verify.** `Toolbox/tb kb lint` — no errors and no warnings about retired statuses.
    `Toolbox/tb kb stale` — only notes with the `ask` verdict remain in scope.
 8. **Wrap up.** Counts per verdict, what was applied, open questions. Offer the `kb-commit` skill.

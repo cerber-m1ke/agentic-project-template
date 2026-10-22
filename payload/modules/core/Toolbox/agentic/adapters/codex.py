@@ -1,14 +1,19 @@
-"""Codex CLI renderer: .codex/config.toml, .codex/hooks.json, .codex/agents/<name>.toml.
+"""Codex CLI renderer: .codex/config.toml, .codex/hooks.json, .codex/agents/<name>.toml,
+.codex/rules/project.rules.
 
 Codex reads AGENTS.md and .agents/skills natively, so nothing is linked.
 The project .codex/ is honoured only for trusted projects; new hooks are approved in /hooks.
+Command rules of .agents/permissions.toml become Starlark `prefix_rule(...)` calls; its [claude]
+section is Claude Code only and is skipped with a warning.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from adapters import GENERATED_NOTE, Context, dump_json, dump_toml, hook_command, hooks_by_event, tier_value
+from adapters import (GENERATED_NOTE, PERMISSIONS_FILE, Context, dump_json, dump_toml, hook_command,
+                      hooks_by_event, tier_value)
 
 
 def _config(ctx: Context) -> dict[str, dict[str, Any]]:
@@ -69,8 +74,44 @@ def _subagent(ctx: Context, agent) -> str:
     return dump_toml(doc, multiline=True)
 
 
+# Canonical decision -> Codex execpolicy decision.
+RULE_DECISIONS = {"deny": "forbidden", "ask": "prompt", "allow": "allow"}
+
+
+def _starlark(value: str) -> str:
+    """A Starlark string literal (JSON escapes are valid Starlark)."""
+    return json.dumps(value, ensure_ascii=False)
+
+
+def rules(ctx: Context) -> str | None:
+    """.codex/rules/project.rules: one prefix_rule per [[command]]; None if there are none."""
+    skipped = sum(len(items) for items in ctx.permissions.claude.values())
+    if skipped:
+        ctx.notes.append(f"{PERMISSIONS_FILE}: [claude] has {skipped} Claude Code-only rule(s), not "
+                         "applied by codex (use [[command]] for rules every agent applies)")
+    if not ctx.permissions.commands:
+        return None
+    blocks = []
+    for rule in ctx.permissions.commands:
+        lines = ["prefix_rule(",
+                 f"    pattern = [{', '.join(_starlark(x) for x in rule.prefix)}],",
+                 f"    decision = {_starlark(RULE_DECISIONS[rule.decision])},"]
+        if rule.reason:
+            lines.append(f"    justification = {_starlark(rule.reason)},")
+        blocks.append("\n".join(lines + [")"]))
+    return (f"# {GENERATED_NOTE}\n# Source: {PERMISSIONS_FILE}. Check: codex execpolicy check "
+            "--rules <this file> -- <command>\n\n" + "\n\n".join(blocks) + "\n")
+
+
 def render(ctx: Context) -> dict[str, str]:
     files: dict[str, str] = {}
+    target = ctx.section("permissions").get("target")
+    if target:
+        content = rules(ctx)
+        if content:
+            files[str(target)] = content
+    elif ctx.permissions.commands:
+        ctx.warnings.append("adapter.toml has no [permissions] target; .agents/permissions.toml skipped")
     for path, doc in _config(ctx).items():
         files[path] = dump_toml(doc)
     hooks = _hooks(ctx)

@@ -1,0 +1,45 @@
+# Permission rules of the project in a canonical, agent-neutral form. `Toolbox/tb agents link`
+# renders them for every agent linked on this machine; run it again after editing this file.
+#   Claude Code: `permissions` in .claude/settings.json, next to the template's read-only tb rules.
+#   Codex: .codex/rules/project.rules (Starlark prefix_rule); read only in a trusted project,
+#   restart Codex to apply. Check: codex execpolicy check --rules .codex/rules/project.rules -- <cmd>
+# Personal rules belong in the agent's local settings (.claude/settings.local.json, ~/.codex/rules/),
+# not here. This file is committed to git: never put secrets here.
+#
+# Schema:
+#
+#   [[command]]                     # a shell command, matched by its argv prefix
+#   prefix = ["git", "push"]        # non-empty list of words: no whitespace, quotes or `*`
+#   decision = "ask"                # deny | ask | allow
+#   reason = "…"                    # optional: shown by the agent (Codex justification)
+#
+#   Claude Code: Bash(git push) and Bash(git push *); Codex: prefix_rule(pattern = ["git", "push"],
+#   decision = "prompt"). deny -> forbidden, ask -> prompt, allow -> allow.
+#   Words are joined with spaces as is: Claude Code matches the rule text, Codex the argv words.
+#   A word with whitespace, quotes or `*` (a wildcard for Claude Code, a literal for Codex) would
+#   match differently, so such a rule is skipped with a warning; write it in [claude] instead.
+#   Codex prefix_rule matches argv from the start only, with no wildcard in the middle: rules like
+#   `git -C * push` or `curl * | sh` cannot be expressed for Codex; write them in [claude].
+#
+#   [claude]                        # Claude Code-only rules, copied as is (Codex skips them)
+#   deny = ["Read(./secrets/**)"]
+#   ask = []
+#   allow = []
+#
+# Examples (uncomment and adapt):
+#
+# [[command]]
+# prefix = ["git", "push", "--force"]
+# decision = "deny"
+# reason = "Rewrites shared history; push without --force"
+#
+# [[command]]
+# prefix = ["git", "push"]
+# decision = "ask"
+#
+# [[command]]
+# prefix = ["make", "test"]
+# decision = "allow"
+#
+# [claude]
+# deny = ["Read(./.env)", "Read(./secrets/**)"]

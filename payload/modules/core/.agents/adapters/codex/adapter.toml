@@ -7,7 +7,7 @@ name = "codex"
 title = "Codex CLI"
 tier = 3                       # 0 AGENTS.md only, 1 + native skills, 2 + subagents, 3 + hooks
 outputs = ["/.codex/"]         # generated paths; must be in the project .gitignore block
-link_hint = "Codex reads .codex/ only in trusted projects; approve new hooks once in /hooks."
+link_hint = "Codex reads .codex/ only in trusted projects; approve new hooks once in /hooks; restart Codex to apply changed rules."
 
 [instructions]
 mode = "native"                # reads AGENTS.md itself: nothing to generate
@@ -45,3 +45,12 @@ disable = true                 # [features] memories = false
 
 [mcp]
 target = ".codex/config.toml"  # [mcp_servers.<name>]
+
+[permissions]
+# [[command]] rules of .agents/permissions.toml as Starlark prefix_rule(...) calls
+# (deny -> "forbidden", ask -> "prompt", allow -> "allow"); written only when there are rules.
+# [claude] rules are Claude Code only: skipped with a warning.
+# Codex reads project rules only in a trusted project; rules are marked experimental (2026).
+# Check a command: codex execpolicy check --rules .codex/rules/project.rules -- git push --force
+# Restart Codex after the rules change.
+target = ".codex/rules/project.rules"

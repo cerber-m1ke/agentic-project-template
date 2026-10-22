@@ -14,7 +14,10 @@ regularly (skills `kb-review` and `plan-review`).
 - Turn relative dates ("yesterday", "next month") into absolute ones: `2026-10-08`.
 - File names: ASCII, lowercase kebab-case: `uv-proxy-ssl.md`. Title and text are in the project language.
 - Links: relative Markdown links: `[Choosing uv](../Decisions/use-uv-for-tools.md)`. Not `[[wikilinks]]`.
-- No secrets: no tokens, passwords, keys or personal data.
+- A link to a note yet to be written gets the link title `"pending"` (the link tooltip):
+  `[Cache](../Gotchas/cache.md "pending")`. `Toolbox/tb kb lint` warns about it without blocking the commit,
+  and `Toolbox/tb kb stale` lists the note as a candidate for completion. Once the target exists, remove the `"pending"` title.
+- No secrets (tokens, passwords, keys) and no real customer or user data: no exports, no personal data.
 - Do not maintain an index by hand: `Toolbox/tb kb index` builds it from frontmatter.
 - The main Agent writes to Knowledge (the librarian only reads); commit only when a human asks (skill `kb-commit`).
 
@@ -48,13 +51,19 @@ created: 2026-10-08
 verified: 2026-10-08       # when it was last checked against reality
 tags: [uv, network]
 aliases: [proxy, https-proxy]   # synonyms, also in other languages — for search
-resources: [api]           # names from Resources/resources.toml
+resources: [api, api/src/billing]   # names from Resources/resources.toml, optionally with a subpath
 applies_to: [uv@0.12]      # gotcha and example only: which versions it applies to
 ---
 ```
 
 - `type`, `title`, `description`, `created` are required; `status` — for all types except gotcha and example.
 - Keys and enum values are always in English; dates are `YYYY-MM-DD`. `Toolbox/tb kb lint` validates the schema.
+- `resources`: a catalog name, optionally with a subpath inside the resource (`api/src/billing`) and a branch
+  (`api@main`). When the resource is cloned, lint checks that the subpath exists. In search, `--resource api`
+  also finds `api/…`, `--resource api/src` only that subpath. Put the resource's card from `Entities/` into the
+  catalog's `entity` field: lint checks that the file exists and hints when the field is empty.
+- Checked a note against reality — `Toolbox/tb kb verify <path|slug>`: sets `verified` to today, leaves the rest
+  of the text untouched, and lints the note. `--date` sets another date, `--dry-run` only shows.
 
 ## Lifecycle
 
@@ -69,6 +78,7 @@ suggests re-checking a note when `verified` (or `created`) is older than a thres
 entity and example — 180, plan (`idea`, `ready`) — 60, task (`active`, `blocked`) — 30, decision (`proposed`) — 30.
 A task with status `done` is always listed: its takeaways have not been harvested yet. So is a note with
 a retired status (`superseded`, `resolved`, `outdated`, `dropped`): it is dead and due for deletion.
+So is a note with pending links (`"pending"`): it is due for completion.
 
 ## Commands
 
@@ -79,8 +89,9 @@ a retired status (`superseded`, `resolved`, `outdated`, `dropped`): it is dead a
 | `Toolbox/tb kb related <path\|slug>` | Links and backlinks |
 | `Toolbox/tb kb new <type> <slug> --title "…" --description "…"` | New note from a template; `--folder` — a task as a folder |
 | `Toolbox/tb kb index` | Index grouped by type |
-| `Toolbox/tb kb lint` | Frontmatter, links, file names, `AGENTS.md` budget |
-| `Toolbox/tb kb stale` | Candidates for re-checking |
+| `Toolbox/tb kb lint` | Frontmatter, links, file names, the Resources catalog, `AGENTS.md` budget |
+| `Toolbox/tb kb verify <path\|slug>…` | Record a check: `verified` set to today, notes linted |
+| `Toolbox/tb kb stale` | Candidates for re-checking and completion |
 
 On Windows (PowerShell): `Toolbox\tb.cmd kb …`.
 

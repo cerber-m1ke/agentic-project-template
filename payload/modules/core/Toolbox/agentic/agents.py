@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -245,12 +246,14 @@ def _backup(root: Path, path: str) -> str:
 
 def _sync_files(root: Path, manifest: dict[str, Any], rendered: dict[str, str],
                 generated: dict[str, str], apply: bool,
-                force: bool = False) -> tuple[list[str], list[str]]:
+                force: bool = False, keep: Collection[str] = ()) -> tuple[list[str], list[str]]:
     """Write rendered files and remove obsolete ones, never touching files changed outside tb
-    (unless forced). Updates `generated` (path -> sha256) when applying."""
+    (unless forced) or listed in `keep`. Updates `generated` (path -> sha256) when applying."""
     changes: list[str] = []
     problems: list[str] = []
     for path, content in rendered.items():
+        if path in keep:
+            continue
         file = root / path
         state = _ownership(root, path, content, generated)
         if state == "ours" and _read(file) == content:
@@ -282,7 +285,7 @@ def _sync_files(root: Path, manifest: dict[str, Any], rendered: dict[str, str],
         generated[path] = common.sha256_text(content)
         changes.append(f"{'+ write' if state == 'absent' else '~ update'} {path}{note}")
     for path in adapters.owned_files(root, manifest, generated):
-        if path in rendered:
+        if path in rendered or path in keep:
             continue
         state = _ownership(root, path, None, generated)
         if state in ("absent", "directory", "foreign", "alias"):
@@ -356,15 +359,18 @@ def link(names: list[str] | None = None, force: bool = False) -> int:
         return 1
     failed = False
     generated = generated_hashes()
+    shared: list[str] = []
     for name in selected:
         manifest = available[name]
         ctx = adapters.load_context(root, name, manifest)
         rendered = adapters.render(ctx)
+        keep = _kept_permissions(ctx)
         changes, problems, _ = _sync_skills(root, manifest, ctx.skills, apply=True)
         file_changes, file_problems = _sync_files(root, manifest, rendered, generated,
-                                                  apply=True, force=force)
+                                                  apply=True, force=force, keep=keep)
         changes += file_changes
-        problems += file_problems
+        problems += [f"{path}: not updated — {_permissions_error(ctx)}" for path in keep] + file_problems
+        shared += ctx.source_warnings
         common.out(f"{name} ({manifest.get('title', name)})")
         for line in changes:
             common.out(f"  {line}")
@@ -374,12 +380,27 @@ def link(names: list[str] | None = None, force: bool = False) -> int:
             common.out("  ✓ up to date")
         if changes and manifest.get("link_hint"):
             common.out(f"  note: {manifest['link_hint']}")
+        for message in dict.fromkeys(ctx.notes):
+            common.out(f"  note: {message}")
         sys.stdout.flush()  # keep warnings next to their agent
         for message in dict.fromkeys(ctx.warnings):
             common.warn(f"{name}: {message}")
         failed = failed or bool(problems)
+    for message in dict.fromkeys(shared):  # the same for every agent: once
+        common.warn(message)
     _save_local(list(dict.fromkeys(local_agents() + selected)), generated)
     return 1 if failed else 0
+
+
+def _kept_permissions(ctx: adapters.Context) -> list[str]:
+    """Generated permission files to leave as they are: .agents/permissions.toml is unreadable, and
+    rendering without its rules would silently drop every deny/ask."""
+    target = ctx.permissions_target()
+    return [target] if ctx.permissions.error and target else []
+
+
+def _permissions_error(ctx: adapters.Context) -> str:
+    return f"{adapters.PERMISSIONS_FILE}: {ctx.permissions.error}; fix it and run Toolbox/tb agents link"
 
 
 def unlink(names: list[str] | None = None, force: bool = False) -> int:
@@ -510,12 +531,17 @@ def _general_checks(root: Path, available: dict[str, dict], line) -> None:
     if resources_dir.is_dir():
         import resources  # local import: agents.py is also used without the resources module
 
-        found = [f"Resources/{p.name}/ ({', '.join(resources.agent_configs(p))})"
-                 for p in sorted(resources_dir.iterdir())
-                 if p.is_dir() and not p.name.startswith(".") and resources.agent_configs(p)]
+        entries, _error = resources.load_catalog()  # unreadable catalog: every folder is reported
+        found = resources.unreviewed_agent_configs(entries)
         if found:
             line("!", "agent settings inside resources are not loaded from the project root (move what "
-                      "the project needs into .agents/): " + "; ".join(found))
+                      "the project needs into .agents/): "
+                      + "; ".join(f"Resources/{name}/ ({', '.join(new)})" for name, new, _ in found))
+            hints = [hint for _, _, hint in found if hint]
+            if hints:
+                common.out("    reviewed? mark them so only new ones are reported:")
+                for hint in hints:
+                    common.out(f"      {hint}")
 
     block = _gitignore_block(root)
     if block is None:
@@ -536,6 +562,7 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     linked = local_agents()
     generated = generated_hashes()
     failures = 0
+    shared: list[str] = []
 
     def line(mark: str, message: str) -> None:
         nonlocal failures
@@ -555,8 +582,11 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
             continue
         ctx = adapters.load_context(root, name, manifest)
         rendered = adapters.render(ctx)
+        keep = _kept_permissions(ctx)
         _, skill_problems, links_ok = _sync_skills(root, manifest, ctx.skills, apply=False)
-        _, file_problems = _sync_files(root, manifest, rendered, generated, apply=False)
+        _, file_problems = _sync_files(root, manifest, rendered, generated, apply=False, keep=keep)
+        file_problems = [f"{path}: kept as is — {_permissions_error(ctx)}" for path in keep] + file_problems
+        shared += ctx.source_warnings
         if manifest.get("skills", {}).get("mode") == "link" and not skill_problems:
             line("✓", f"{links_ok} skill link(s) in {manifest['skills']['target']}")
         elif manifest.get("skills", {}).get("mode") == "native":
@@ -567,7 +597,11 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
             line("✗", problem)
         for message in dict.fromkeys(ctx.warnings):
             line("!", message)
+        for message in dict.fromkeys(ctx.notes):
+            line("·", message)
 
     common.out("project")
+    for message in dict.fromkeys(shared):  # shared .agents/ sources: once, not per agent
+        line("!", message)
     _general_checks(root, available, line)
     return 1 if failures else 0

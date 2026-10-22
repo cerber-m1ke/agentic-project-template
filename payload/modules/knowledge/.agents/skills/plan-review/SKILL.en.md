@@ -28,8 +28,8 @@ finished when:
 
 | Verdict | When | Action |
 |---|---|---|
-| `ready` | Meets the readiness criteria | `status: ready`, `verified` = today |
-| `refine` | The idea is alive but does not meet the readiness criteria | Add what is known, questions — to the human; `idea`, `verified` = today |
+| `ready` | Meets the readiness criteria | `status: ready`, `Toolbox/tb kb verify <path>` |
+| `refine` | The idea is alive but does not meet the readiness criteria | Add what is known, questions — to the human; `idea`, `tb kb verify` |
 | `to-task` | Ready, and the human takes it up now | `Toolbox/tb kb new task <slug>`, move the content, delete the plan |
 | `merge` | Overlaps with another plan or is covered by an active task | Merge into one plan or add to the task; delete the rest |
 | `delete` | Already done; no longer relevant (approach changed, entity gone); the human rejected it | Delete; an important reason for rejection — as a decision in Decisions |
@@ -48,6 +48,9 @@ finished when:
   or `-S '<string>'`, `Resources/<name>/<path>:<line>`, `git log --oneline -- <path>`.
 - "No longer relevant" — what changed: a decision, a removed entity, a new approach; a path or a commit.
 - "Covered by a task" — the task path and the item of its specification.
+- "Not done", "not in the code" — a negative claim: only a search that ignores ignore files, across all
+  affected repositories, including those nested in a resource (`rg --no-ignore`, `git -C <repository> grep`),
+  as in `kb-review`. An empty result of an ordinary search is not evidence.
 - No evidence — `ask`.
 
 ## Steps
@@ -58,12 +61,16 @@ finished when:
 2. **Read.** Read every plan: `Toolbox/tb kb show <path>`.
 3. **Check.** Check against Resources whether it is done and whether it is still relevant. If there are
    more than eight plans and your agent can launch subagents, hand the check to `kb-auditor` in batches
-   per resource, in parallel, marked "skill plan-review".
+   per resource (per module for `<resource>/<subpath>` in `resources`), in parallel, marked
+   "skill plan-review". More than ~30 plans — also pass each one a report path
+   `Runtime/plan-review/<YYYY-MM-DD>/<batch>.md`: the full report goes there, the reply is a summary of at
+   most 10 lines. Consolidate from the report files.
 4. **Verdicts.** Give the verdicts and find overlaps: plan with plan, plan with task.
 5. **Priorities.** For `ready` and `refine`, propose an order by these criteria: benefit, urgency (what
    it blocks), cost, dependencies. The order goes only into the report; plan files are not changed for it.
 6. **Report.** Show the report in the format below and wait for confirmation. Ask which plans to take up.
-7. **Apply** only what was confirmed. Then `Toolbox/tb kb lint` with no errors.
+7. **Apply** only what was confirmed. Kept plans — `Toolbox/tb kb verify <paths>` (do not edit `verified`
+   by hand). Then `Toolbox/tb kb lint` with no errors.
 8. **Wrap up.** Counts per verdict, tasks created, open questions. Offer the `kb-commit` skill.
 
 ## Acceptance criteria

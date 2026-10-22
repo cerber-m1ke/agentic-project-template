@@ -22,9 +22,10 @@
 | `tb kb show <путь\|slug>`, `tb kb related <путь\|slug>` | Заметка целиком; ссылки и обратные ссылки |
 | `tb kb new <type> <slug> [--title T] [--description D] [--folder]` | Новая заметка из `Knowledge/_templates/` |
 | `tb kb index [--base DIR]`, `tb kb lint [--staged]`, `tb kb stale` | Индекс; проверка Знаний и `AGENTS.md` (`--staged` — то, что войдёт в коммит); кандидаты на перепроверку |
+| `tb kb verify [--date YYYY-MM-DD] [--dry-run] <путь\|slug>…` | Отметить сверку: `verified` = сегодня (или `--date`) и проверка заметок |
 | `tb secrets scan [--staged] [пути…]` | Поиск секретов |
 | `tb agents list\|link\|unlink\|doctor` | Адаптеры агентов на этой машине |
-| `tb resources status\|clone\|add` | Ресурсы: состояние, клонирование, добавление в каталог |
+| `tb resources status\|clone\|add\|set` | Ресурсы: состояние, клонирование, добавление и правка записей каталога |
 | `tb obsidian setup` | Конфигурация хранилища Obsidian |
 | `tb ide setup` | IDE не индексируют `Resources/` и `Runtime/`: JetBrains (`.idea/*.iml`), VS Code (`.vscode/settings.json`) |
 | `tb update fetch [--ref vX.Y.Z]` | Скачать свежий (или указанный) релиз шаблона в `Runtime/update/` (дальше — skill `agentic-update`) |
