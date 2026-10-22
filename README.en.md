@@ -251,7 +251,8 @@ A template release is a git tag `vX.Y.Z` (semver) with a section in [CHANGELOG.m
 must describe any migrations. An update takes the latest release, not the current state of the branch.
 A project deployed from a fork is updated from that fork.
 
-Between releases `setup/VERSION` holds the next version with the `-dev` suffix (e.g. `0.2.0-dev`). Init
+Between releases — from the first change after a release — `setup/VERSION` holds the next version with the
+`-dev` suffix (e.g. `0.2.0-dev`). Init
 warns when a project is deployed from such a state, and an update offers release `0.2.0` as soon as it is
 out. Use a release tag for real projects.
 
