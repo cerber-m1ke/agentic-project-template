@@ -93,6 +93,7 @@ The template URL is saved in `.agents/agentic.lock` — the project is updated f
 | `resources` | Always: `Resources/`, the resource catalog, `tb resources` |
 | `obsidian` | On by default: Obsidian vault setup on the machine |
 | `devcontainer` | Optional: `.devcontainer/` for running the Agent in a sandbox container |
+| `adopt` | For the time of moving a large project in: skill `adopt`, `tb adopt`, worker and auditor subagents; removed after the old places are cleaned up |
 
 ## Project structure
 
@@ -174,7 +175,9 @@ evidence for every note, checked in batches by the `kb-auditor` subagent) and `p
 **Initialization** — see [Quick start](#quick-start). When existing projects are wrapped (adopt),
 their repositories are cloned into `Resources/` afresh rather than moved: moving breaks everything tied to
 the absolute path (agent history and memory, IDE settings). Personal knowledge — agents' built-in memory,
-notes — is sorted into Knowledge types by the Agent and confirmed by the human.
+notes — is sorted into Knowledge types by the Agent and confirmed by the human. A large project (dozens of
+repositories, a notes vault, working documents, agent memory) is moved in with the `adopt` module: in stages,
+in batches with ledgers and an audit, and the old places are deleted only by a manifest after a final audit.
 
 **New machine:**
 

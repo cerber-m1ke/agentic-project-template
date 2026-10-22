@@ -28,6 +28,7 @@
 | `tb resources status\|clone\|add\|set` | Ресурсы: состояние, клонирование, добавление и правка записей каталога |
 | `tb obsidian setup` | Конфигурация хранилища Obsidian |
 | `tb ide setup` | IDE не индексируют `Resources/` и `Runtime/`: JetBrains (`.idea/*.iml`), VS Code (`.vscode/settings.json`) |
+| `tb adopt start\|inventory\|sources\|manifest\|check\|gate\|status\|…` | Перенос большого проекта (только с модулем `adopt`; процедура — skill `adopt`) |
 | `tb update fetch [--ref vX.Y.Z]` | Скачать свежий (или указанный) релиз шаблона в `Runtime/update/` (дальше — skill `agentic-update`) |
 | `tb hook <name> [--agent A]` | Обработчики хуков; вызываются агентами, не вручную. Никогда не блокируют агента и ничего не скачивают |
 | `tb run <script> [аргументы…]` | Запустить скрипт через uv |

@@ -4,7 +4,8 @@
 # [tool.uv]
 # exclude-newer = "2026-10-01T00:00:00Z"
 # ///
-"""End-to-end smoke test: release -> clone -> init -> tb commands -> next release -> update
+"""End-to-end smoke test: release -> clone -> init -> tb commands -> module adopt (init, ledgers, gate,
+removal) -> next release -> update
 (conflicts, removal, seeded changes, a new module, a language switch) -> a project initialized from
 a development state receives the release.
 
@@ -500,6 +501,128 @@ def stage_precommit_blocks(project: Path, env: dict, draft: Path) -> None:
     leak.unlink()
 
 
+def stage_adopt(origin: Path, work: Path, env: dict, version: str) -> None:
+    """Module adopt: init --with adopt, a synthetic old project under a fake HOME, the ledger pipeline up
+    to a green gate and a commit through the hook, then removal of the module by update."""
+    project, home = work / "adopt-project", work / "adopt-home"
+    env = {**env, "HOME": str(home), "USERPROFILE": str(home)}
+    git("clone", "--quiet", str(origin), str(project), cwd=work, env=env)
+    args = ["--name", "adopted", "--language", "ru", "--agents", "claude,codex", "--with", "adopt", "--yes"]
+    cmd = ["cmd", "/c", str(project / "init.cmd"), *args] if WINDOWS else ["sh", str(project / "init.sh"), *args]
+    res = run(cmd, project, env, timeout=1200)
+    R.require("adopt: init --with adopt", res.returncode == 0, tail(output(res)))
+    lock = tomllib.loads(read(project / il.LOCK_PATH))
+    R.check("adopt: module in the lock", "adopt" in lock["project"]["modules"], f"{lock['project']}")
+    installed = [".agents/skills/adopt/SKILL.md", ".agents/skills/adopt/rules.md",
+                 ".agents/skills/adopt/templates/adopt.toml", "Toolbox/agentic/adopt.py",
+                 ".claude/skills/adopt/SKILL.md", ".claude/agents/adopt-worker.md", ".codex/agents/adopt-auditor.toml"]
+    R.check("adopt: skill, tb code and subagents installed", all((project / p).exists() for p in installed),
+            f"{[p for p in installed if not (project / p).exists()]}")
+    R.check("adopt: auditor runs on the strong model", "model: opus" in read(project / ".claude/agents/adopt-auditor.md"))
+
+    # The old project: a repository with local-only work, a vault with wikilinks, Claude memory.
+    old, vault = home / "src" / "appOld", home / "Vaults" / "App"
+    repo, server = old / "api", work / "remotes" / "adopt-api.git"
+    repo.mkdir(parents=True)
+    git("init", "--quiet", cwd=repo, env=env)
+    (repo / "README.md").write_text("# api\n", encoding="utf-8")
+    git("add", "README.md", cwd=repo, env=env)
+    git("commit", "--quiet", "-m", "init", cwd=repo, env=env)
+    git("clone", "--quiet", "--bare", str(repo), str(server), cwd=work, env=env)
+    git("remote", "add", "origin", str(server), cwd=repo, env=env)
+    git("fetch", "--quiet", "origin", cwd=repo, env=env)
+    git("checkout", "--quiet", "-b", "wip", cwd=repo, env=env)
+    (repo / "wip.txt").write_text("wip\n", encoding="utf-8")
+    git("add", "wip.txt", cwd=repo, env=env)
+    git("commit", "--quiet", "-m", "wip", cwd=repo, env=env)
+    (vault / ".obsidian").mkdir(parents=True)
+    (vault / "decisions").mkdir()
+    (vault / "decisions" / "2026-01-05-api-tokens.md").write_text(
+        "# Токены API\n\nСрок жизни — сутки, см. [[cache-policy]].\n", encoding="utf-8")
+    (vault / "decisions" / "cache-policy.md").write_text("# Кэш\n\nНе кэшируем ответы с токеном.\n", encoding="utf-8")
+    memory = home / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(old)) / "memory"
+    memory.mkdir(parents=True)
+    (memory / "MEMORY.md").write_text("- [api](api.md)\n", encoding="utf-8")
+
+    tb = tb_cmd(project)
+    res = run([*tb, "adopt", "start", "move", "--old-root", str(old), "--archive-dir", str(home / "Archive")],
+              project, env)
+    task = project / "Knowledge" / "Tasks" / "move"
+    R.check("tb adopt start", res.returncode == 0 and (task / "index.md").is_file() and (task / "adopt.toml").is_file(),
+            tail(output(res)))
+    res = run([*tb, "adopt", "inventory"], project, env)
+    R.check("tb adopt inventory: finds the local-only branch",
+            res.returncode == 0 and "with local work: 1" in res.stdout and "appOld/api" in res.stdout, tail(output(res)))
+    res = run([*tb, "adopt", "sources", "--vault", str(vault)], project, env)
+    R.check("tb adopt sources: vault folder and Claude memory",
+            res.returncode == 0 and 'folder = "Decisions"' in res.stdout and 'kind = "claude-memory"' in res.stdout,
+            tail(output(res)))
+    cfg = task / "adopt.toml"
+    cfg.write_text(read(cfg) + '\n[[source]]\nname = "decisions"\nkind = "vault"\npaths = ["~/Vaults/App/decisions"]\n'
+                               'folder = "Decisions"\n', encoding="utf-8")
+    for args_ in (["manifest"], ["slugmap"]):
+        res = run([*tb, "adopt", *args_], project, env)
+        R.check(f"tb adopt {args_[0]}", res.returncode == 0, tail(output(res)))
+    for slug, title in (("api-tokens", "Токены API"), ("cache-policy", "Кэш ответов")):
+        run([*tb, "kb", "new", "decision", slug, "--title", title, "--description", f"{title}: решение"], project, env)
+    note = project / "Knowledge" / "Decisions" / "api-tokens.md"
+    il.write_file(project, "Knowledge/Decisions/api-tokens.md",
+                  (read(note).rstrip("\n") + "\n\nСрок жизни — сутки, см. [[cache-policy]].\n").encode("utf-8"), text=True)
+    res = run([*tb, "adopt", "links", "--write"], project, env)
+    R.check("tb adopt links --write: wikilink -> relative link",
+            res.returncode == 0 and "[Кэш ответов](cache-policy.md)" in read(note), tail(output(res)) + read(note)[-200:])
+    entries = [line for line in read(task / "ledger" / "decisions" / "manifest.txt").splitlines()
+               if line and not line.startswith("#")]
+    batch = task / "ledger" / "decisions" / "01.md"
+
+    def write_batch(audit: str) -> None:
+        targets = {"2026-01-05-api-tokens": "Knowledge/Decisions/api-tokens.md",
+                   "cache-policy": "Knowledge/Decisions/cache-policy.md"}
+        rows = [f"| {e} | migrated | {targets[Path(e).stem]} | | {audit} |" for e in entries]
+        batch.write_text("# decisions / 01\n\n| Источник | Вердикт | Цель | Причина | Аудит |\n|---|---|---|---|---|\n"
+                         + "\n".join(rows) + "\n", encoding="utf-8")
+
+    write_batch("")
+    res = run([*tb, "adopt", "check", "decisions"], project, env)
+    R.check("tb adopt check: RED without the audit", res.returncode == 1 and "RED" in res.stdout, tail(output(res)))
+    res = run([*tb, "adopt", "check", "decisions", "01", "--pre-audit"], project, env)
+    R.check("tb adopt check --pre-audit: GREEN", res.returncode == 0, tail(output(res)))
+    write_batch("ok")
+    res = run([*tb, "adopt", "gate"], project, env)
+    R.check("tb adopt gate: GREEN", res.returncode == 0 and "GREEN" in res.stdout, tail(output(res)))
+    res = run([*tb, "adopt", "archive", "old-vault", str(vault)], project, env)
+    archive = home / "Archive" / "old-vault.tgz"
+    R.check("tb adopt archive: verified, mode 600", res.returncode == 0 and archive.is_file()
+            and (WINDOWS or archive.stat().st_mode & 0o777 == 0o600), tail(output(res)))
+    run(["git", "add", "--", "Knowledge"], project, env)
+    res = run(["git", "commit", "-m", "knowledge: adopt pilot batch"], project, env)  # runs pre-commit
+    R.check("adopt: task and notes committed through the pre-commit hook", res.returncode == 0, tail(output(res)))
+
+    res = run([*tb, "update", "fetch", "--ref", f"v{version}"], project, env)
+    script = f"Runtime/update/{version}/setup/update.py"
+    R.require("adopt: fetch the installed release to change modules", res.returncode == 0, tail(output(res)))
+    res = run([*tb, "run", script, "apply", "--project", str(project), "--yes", "--remove-module", "adopt"],
+              project, env)
+    R.require("update.py apply --remove-module adopt", res.returncode == 0, tail(output(res)))
+    lock = tomllib.loads(read(project / il.LOCK_PATH))
+    gone = [p for p in (".agents/skills/adopt", "Toolbox/agentic/adopt.py", "Toolbox/agentic/adopt_sources.py",
+                        ".agents/agents/adopt-worker.md") if (project / p).exists()]
+    R.check("remove-module adopt: module files deleted, lock updated",
+            not gone and "adopt" not in lock["project"]["modules"]
+            and not any("adopt" in f for f in lock["files"]), f"left: {gone}")
+    R.check("remove-module adopt: the task data stays",
+            (task / "ledger" / "decisions" / "01.md").is_file() and (task / "adopt.toml").is_file())
+    res = run([*tb, "agents", "link"], project, env)
+    R.check("after removal: tb agents link drops the subagents and the skill link",
+            res.returncode == 0 and not (project / ".claude/agents/adopt-worker.md").exists()
+            and not (project / ".claude/skills/adopt").exists(), tail(output(res)))
+    res = run([*tb, "adopt", "status"], project, env)
+    R.check("after removal: no tb adopt", res.returncode != 0 and "invalid choice" in output(res), tail(output(res)))
+    for args_ in (["kb", "lint"], ["agents", "doctor"]):
+        res = run([*tb, *args_], project, env)
+        R.check(f"after removal: tb {' '.join(args_)}", res.returncode == 0, tail(output(res)))
+
+
 def stage_next_release(origin: Path, lock: dict, env: dict, version: str) -> tuple[str, dict]:
     new = bump_minor(version)
     files = lock["files"]
@@ -655,6 +778,7 @@ def main() -> int:
         stage_refusals(origin, work, env)
         lock = stage_init(origin, project, env, version, commit)
         stage_toolbox(project, env, work)
+        stage_adopt(origin, work, env, version)
         new, info = stage_next_release(origin, lock, env, version)
         stage_update(project, env, new, info)
         stage_dev_release(origin, work, env, new)

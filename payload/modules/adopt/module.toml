@@ -1,0 +1,10 @@
+name = "adopt"
+description = "Moving a large existing project in: skill adopt, tb adopt (inventory, ledgers, checks, archives), worker and auditor subagents"
+required = false
+default = false
+# Installed for the time of the move and removed after the old places are cleaned up. The move's data
+# (Knowledge/Tasks/<task>/: plan, ledgers, rules) belongs to the task and stays after removal.
+seeded = []
+block = []
+executable = []
+post_install = []

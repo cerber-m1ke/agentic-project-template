@@ -17,7 +17,7 @@
 - `setup/` — инсталлятор, в проект не попадает: `DESIGN.md`, `INIT.md`, `UPDATE.md`, `init.py`, `update.py`,
   `installer_lib.py`, `i18n_check.py`, `VERSION`, `profiles/`, `migrations/`, `tests/`.
 - `payload/modules/<module>/` — файлы модуля в раскладке проекта + `module.toml`. Модули: `core`,
-  `knowledge`, `resources`, `obsidian`, `devcontainer`.
+  `knowledge`, `resources`, `obsidian`, `devcontainer`, `adopt`.
 - `init.sh`, `init.cmd` — вход в инициализацию. `README.md`/`README.en.md` — для человека.
 - `CHANGELOG.md` — версии и миграции.
 

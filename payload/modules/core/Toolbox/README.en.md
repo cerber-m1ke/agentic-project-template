@@ -28,6 +28,7 @@ in the output are relative to the project root.
 | `tb resources status\|clone\|add\|set` | Resources: status, cloning, adding and editing catalog entries |
 | `tb obsidian setup` | Obsidian vault configuration |
 | `tb ide setup` | IDEs do not index `Resources/` and `Runtime/`: JetBrains (`.idea/*.iml`), VS Code (`.vscode/settings.json`) |
+| `tb adopt start\|inventory\|sources\|manifest\|check\|gate\|status\|…` | Moving a large project in (only with the `adopt` module; procedure — skill `adopt`) |
 | `tb update fetch [--ref vX.Y.Z]` | Download a fresh (or the given) template release into `Runtime/update/` (next — skill `agentic-update`) |
 | `tb hook <name> [--agent A]` | Hook handlers; called by agents, not by hand. Never block the agent and never download anything |
 | `tb run <script> [args…]` | Run a script via uv |

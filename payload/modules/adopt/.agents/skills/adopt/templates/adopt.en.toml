@@ -1,0 +1,22 @@
+# tb adopt settings for this task (skill adopt). Paths — absolute or relative to ~.
+
+# Old copies of the project: read-only until cleanup.
+old_roots = []
+# Directory for tb adopt archive archives — outside the project.
+archive_dir = ""
+# Folder resource for secret files (not in git, mode 700, hidden in .ignore): the target of the secret verdict.
+secrets_dir = "Resources/secrets"
+
+# Knowledge sources: tb adopt sources prints candidates. Fields:
+#   name    — kebab-case, the name of the ledger folder ledger/<name>/
+#   kind    — vault | docs | claude-memory | codex-memory | agent-files | loose-docs | transcripts | instructions
+#   paths   — files and directories (* patterns allowed); agent-files and loose-docs default to old_roots
+#   folder  — type folder for slugmap (Decisions, Entities, Examples, Gotchas, Plans, Tasks)
+#   include, exclude — patterns by path (~/…) or file name
+#   codex_cwd — transcripts: Codex sessions whose working directory is inside these paths
+#
+# [[source]]
+# name = "vault-decisions"
+# kind = "vault"
+# paths = ["~/Vaults/App/decisions"]
+# folder = "Decisions"

@@ -15,7 +15,8 @@ import sys
 
 import common
 
-COMMAND_MODULES = ("kb", "agents", "resources", "machine", "obsidian", "ide", "update_cmd", "hook", "secret_scan")
+COMMAND_MODULES = ("kb", "agents", "resources", "machine", "obsidian", "ide", "update_cmd", "hook", "secret_scan",
+                   "adopt")  # adopt: optional module; absent → no `tb adopt`
 
 
 def cmd_version(_args: argparse.Namespace) -> int:

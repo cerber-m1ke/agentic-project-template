@@ -1,0 +1,22 @@
+# Настройки tb adopt для этой задачи (skill adopt). Пути — абсолютные или от ~.
+
+# Старые копии проекта: только чтение до очистки.
+old_roots = []
+# Каталог архивов tb adopt archive — вне проекта.
+archive_dir = ""
+# Папка-ресурс для файлов-секретов (не в git, права 700, скрыта в .ignore): цель вердикта secret.
+secrets_dir = "Resources/secrets"
+
+# Источники знаний: tb adopt sources печатает кандидатов. Поля:
+#   name    — kebab-case, имя папки реестра ledger/<name>/
+#   kind    — vault | docs | claude-memory | codex-memory | agent-files | loose-docs | transcripts | instructions
+#   paths   — файлы и каталоги (шаблоны * разрешены); agent-files и loose-docs по умолчанию — old_roots
+#   folder  — папка-тип для slugmap (Decisions, Entities, Examples, Gotchas, Plans, Tasks)
+#   include, exclude — шаблоны по пути (~/…) или имени файла
+#   codex_cwd — transcripts: сессии Codex, чей рабочий каталог внутри этих путей
+#
+# [[source]]
+# name = "vault-decisions"
+# kind = "vault"
+# paths = ["~/Vaults/App/decisions"]
+# folder = "Decisions"

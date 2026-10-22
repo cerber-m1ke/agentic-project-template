@@ -6,7 +6,7 @@
 # ///
 """Unit tests of the parts where a mistake loses project data or misleads the user: managed-block
 markers, versions and migrations, update classification, payload files, the secret scanner,
-resource URLs, Knowledge note statuses, IDE excludes.
+resource URLs, Knowledge note statuses, IDE excludes, adopt ledgers, links and archives.
 
     TB_ROOT=. payload/modules/core/Toolbox/tb run setup/tests/unit_test.py
 """
@@ -27,7 +27,10 @@ from pathlib import Path  # noqa: E402
 TEMPLATE_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(TEMPLATE_ROOT / "setup"))
 sys.path.insert(0, str(TEMPLATE_ROOT / "payload" / "modules" / "core" / "Toolbox" / "agentic"))
+sys.path.insert(0, str(TEMPLATE_ROOT / "payload" / "modules" / "adopt" / "Toolbox" / "agentic"))
 
+import adopt  # noqa: E402
+import adopt_sources  # noqa: E402
 import installer_lib as il  # noqa: E402
 import update  # noqa: E402
 import ide  # noqa: E402
@@ -828,6 +831,362 @@ class PermissionRules(_ToolboxProject):
         self.assertEqual(doctor.count("command #1"), 1, doctor)
         self.assertIn("· .agents/permissions.toml: [claude] has 1", doctor)
         self.assertNotIn("! .agents/permissions.toml: [claude]", doctor)
+
+
+class AdoptProject(KnowledgeProject):
+    """A temporary project with the adopt templates installed (ru) and a fake HOME with old places."""
+
+    ADOPT = TEMPLATE_ROOT / "payload" / "modules" / "adopt"
+
+    def setUp(self):
+        super().setUp()
+        self.home = self.root.parent / (self.root.name + "-home")
+        self.home.mkdir()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.home, ignore_errors=True))
+        saved = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+        os.environ["HOME"] = os.environ["USERPROFILE"] = str(self.home)
+
+        def restore():
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        self.addCleanup(restore)
+        module = il.load_modules(TEMPLATE_ROOT)["adopt"]
+        for dest, src in il.module_files(module, "ru", TEMPLATE_ROOT):
+            if dest.startswith(adopt.TEMPLATES):
+                self.write(dest, (TEMPLATE_ROOT / src).read_text(encoding="utf-8"))
+
+    def run_cmd(self, func, **kwargs) -> tuple[int, str]:
+        kwargs.setdefault("task", None)
+        return self.tb(func, **kwargs)
+
+    def start(self, *old: Path) -> adopt.Task:
+        code, out = self.tb(adopt.cmd_start, slug="move", title=None, old_root=[str(p) for p in old],
+                            archive_dir=str(self.home / "Archive"))
+        self.assertEqual(code, 0, out)
+        return adopt.find_task(None)
+
+    def add_sources(self, text: str) -> adopt.Task:
+        cfg = self.root / adopt.TASKS_DIR / "move" / adopt.CONFIG
+        cfg.write_text(cfg.read_text(encoding="utf-8") + "\n" + text, encoding="utf-8")
+        return adopt.find_task(None)
+
+    def batch(self, source: str, name: str, rows: list[str], extra: str = "") -> Path:
+        table = ["# x", "", "| Источник | Вердикт | Цель | Причина | Аудит |", "|---|---|---|---|---|", *rows]
+        return self.write(f"{adopt.TASKS_DIR}/move/ledger/{source}/{name}.md", "\n".join(table) + "\n" + extra)
+
+
+class AdoptBasics(unittest.TestCase):
+    def test_to_slug(self):
+        cases = {"2026-03-01-Кэш_токенов": "kesh-tokenov", "Auth Tokens (v2)": "auth-tokens-v2", "CON": "con-note",
+                 "2026-01-01": "2026-01-01", "": "note", "Щука ёлка": "shchuka-elka"}
+        for stem, slug in cases.items():
+            with self.subTest(stem=stem):
+                self.assertEqual(adopt.to_slug(stem), slug)
+
+    def test_cells_and_targets(self):
+        self.assertEqual(adopt.split_cells("| a \\| b | `c` | d |"), ["a | b", "c", "d"])
+        self.assertEqual(adopt.split_targets("`Knowledge/A/x.md`<br>Knowledge/B/y.md, —"),
+                         ["Knowledge/A/x.md", "Knowledge/B/y.md"])
+
+    def test_claude_dir_name(self):
+        self.assertEqual(adopt_sources.claude_dir_name(Path("/Users/me/src/my_api.v2")), "-Users-me-src-my-api-v2")
+
+    def test_digest_redacts_secrets(self):
+        secret = "DB_PASSWORD=S3cr3tPassw0rd"  # agentic:allow-secret (test fixture)
+        text = adopt_sources.redact(f"run with {secret} please")
+        self.assertNotIn("S3cr3tPassw0rd", text)
+        self.assertIn("[secret:", text)
+        pem = "-----" + "BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA1234\n-----" + "END RSA PRIVATE KEY-----"
+        self.assertEqual(adopt_sources.redact(f"key:\n{pem}\ndone"), "key:\n[secret: private key]\ndone")
+
+
+class AdoptStart(AdoptProject):
+    def test_start_creates_a_lint_clean_task(self):
+        task = self.start(self.home / "appOld")
+        self.assertEqual(task.old_roots, ["~/appOld"])
+        self.assertEqual(task.archive_dir, "~/Archive")
+        for name in ("index.md", "plan.md", "rules.md", "resources.md", "questions.md", "final-audit.md",
+                     "deletion-manifest.md", "ledger/README.md", "adopt.toml"):
+            self.assertTrue((task.dir / name).is_file(), name)
+        index = (task.dir / "index.md").read_text(encoding="utf-8")
+        self.assertIn('title: "Adopt: move"', index)
+        self.assertIn("--task move", index)
+        self.assertNotIn("{{", index + (task.dir / "plan.md").read_text(encoding="utf-8"))
+        self.assertEqual([p for p in self.lint() if p[1] == "error"], [])
+        code, out = self.tb(adopt.cmd_start, slug="move", title=None, old_root=[], archive_dir=None)
+        self.assertEqual(code, 1)
+        self.assertIn("already exists", out)
+
+    def test_no_task(self):
+        with self.assertRaises(adopt.AdoptError):
+            adopt.find_task(None)
+
+
+class AdoptLedger(AdoptProject):
+    def setUp(self):
+        super().setUp()
+        vault = self.home / "Vaults" / "App"
+        for name in ("2026-01-02-auth.md", "cache.md", "gone.md"):
+            p = vault / "decisions" / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(f"# {name}\n\nSee [[cache]] and [[gone|the old one]].\n", encoding="utf-8")
+        self.start(self.home / "appOld")
+        self.task = self.add_sources('[[source]]\nname = "vault-decisions"\nkind = "vault"\n'
+                                     'paths = ["~/Vaults/App/decisions"]\nfolder = "Decisions"\n\n'
+                                     '[[source]]\nname = "memory"\nkind = "claude-memory"\npaths = ["~/nowhere"]\n')
+        code, out = self.run_cmd(adopt.cmd_manifest, source=None)
+        self.assertEqual(code, 0, out)
+        self.entries = adopt.read_manifest(self.task, "vault-decisions")
+        self.auth, self.cache, self.gone = self.entries
+
+    def check(self, source: str = "vault-decisions", batch: str | None = None, pre: bool = False):
+        return self.run_cmd(adopt.cmd_check, source=source, batch=batch, pre_audit=pre)
+
+    def test_manifest_uses_tilde_paths(self):
+        self.assertEqual(self.entries, ["~/Vaults/App/decisions/2026-01-02-auth.md",
+                                        "~/Vaults/App/decisions/cache.md", "~/Vaults/App/decisions/gone.md"])
+        self.assertEqual(adopt.read_manifest(self.task, "memory"), [])
+
+    def test_check_errors(self):
+        self.note("Decisions/auth.md")
+        self.batch("vault-decisions", "01", [
+            f"| {self.auth} | migrated | Knowledge/Decisions/auth.md | | ok |",
+            f"| {self.auth} | obsolete | | done | ok |",
+            f"| {self.cache} | migrated | Knowledge/Decisions/missing.md | | fix: wrong |",
+            "| ~/elsewhere.md | junk | | | |",
+            "| only | three | cells |",
+        ])
+        code, out = self.check()
+        self.assertEqual(code, 1, out)
+        for msg in ("covered 2 times", "target does not exist", "audit is 'fix: wrong'", "not in the manifest",
+                    "verdict junk needs a reason", "expected 5 columns", f"{self.gone}: not covered", "RED"):
+            self.assertIn(msg, out)
+
+    def test_pre_audit_then_green(self):
+        self.note("Decisions/auth.md")
+        self.note("Decisions/cache.md")
+        rows = [f"| {self.auth} | migrated | Knowledge/Decisions/auth.md | | |",
+                f"| {self.cache} | duplicate-candidate | Knowledge/Decisions/auth.md | same topic | |",
+                f"| {self.gone} | obsolete | | removed in a1b2c3d | |"]
+        self.batch("vault-decisions", "01", rows)
+        code, out = self.check(batch="01", pre=True)
+        self.assertEqual(code, 0, out)
+        code, out = self.check()
+        self.assertIn("duplicate-candidate is not resolved", out)
+        self.batch("vault-decisions", "01", [f"| {self.auth} | migrated | Knowledge/Decisions/auth.md | | ok |",
+                                             f"| {self.cache} | migrated | Knowledge/Decisions/cache.md | | ok |",
+                                             f"| {self.gone} | obsolete | | removed in a1b2c3d | ok |"])
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("3/3 covered", out)
+
+    def test_wikilinks_left_in_a_target(self):
+        self.note("Decisions/auth.md", "See [[cache]].\n\n`[[in code]]`\n")
+        self.batch("vault-decisions", "01", [f"| {self.auth} | migrated | Knowledge/Decisions/auth.md | | ok |"])
+        _code, out = self.check(batch="01")
+        self.assertIn("wikilinks left", out)
+
+    def test_secret_target_under_secrets_dir(self):
+        self.write("Resources/secrets/key.pem", "x")
+        self.batch("vault-decisions", "01", [f"| {self.auth} | secret | Resources/secrets/key.pem | | ok |",
+                                             f"| {self.cache} | secret | Knowledge/Decisions/x.md | | ok |"])
+        _code, out = self.check(batch="01")
+        self.assertNotIn("key.pem", out)
+        self.assertIn("secret target must be under Resources/secrets/", out)
+
+    def test_gate_needs_accepted_handoffs(self):
+        self.note("Decisions/auth.md")
+        rows = [f"| {self.auth} | migrated | Knowledge/Decisions/auth.md | | ok |",
+                f"| {self.cache} | junk | | empty | ok |", f"| {self.gone} | junk | | empty | ok |"]
+        self.batch("vault-decisions", "01", rows,
+                   "\n## Передача\n\n- #1 → vault-decisions: ~/x — fact\n- #2 vault-decisions: no arrow\n"
+                   "\n## Вопросы\n\n- #1 keep it? — context\n- #2 answered — ctx (ответ: yes)\n")
+        code, out = self.run_cmd(adopt.cmd_gate)
+        self.assertEqual(code, 1, out)
+        self.assertIn("handoff vault-decisions/01#1 → vault-decisions is not accepted yet", out)
+        self.assertIn("handoff #2 needs a receiving source", out)
+        self.assertIn("open question vault-decisions/01#1", out)
+        self.assertNotIn("01#2 (", out)
+        self.batch("vault-decisions", "01", rows,
+                   "\n## Передача\n\n- #1 → vault-decisions: ~/x — fact\n\nпринято: vault-decisions/01#1 → "
+                   "Knowledge/Decisions/auth.md\n")
+        code, out = self.run_cmd(adopt.cmd_gate)
+        self.assertEqual(code, 0, out)
+        code, out = self.run_cmd(adopt.cmd_status)
+        self.assertIn("vault-decisions (vault): 3/3 covered, 3/3 audited ok", out)
+        self.assertIn("open handoffs: 0", out)
+
+    def test_slugmap_and_links(self):
+        code, out = self.run_cmd(adopt.cmd_slugmap, force=False)
+        self.assertEqual(code, 0, out)
+        smap = adopt.read_slugmap(self.task)
+        self.assertEqual(smap["2026-01-02-auth"][2], "Knowledge/Decisions/auth.md")
+        self.assertEqual(self.run_cmd(adopt.cmd_slugmap, force=False)[0], 1, "no overwrite without --force")
+        self.note("Decisions/auth.md", "See [[cache]], [[gone|the old one]], [[2026-01-02-auth#Part]], "
+                                       "![[cache]], `[[cache]]` and [x](cache.md).\n\n```\n[[cache]]\n```\n"
+                                       "[[nobody]]\n")
+        self.batch("vault-decisions", "01", [f"| {self.gone} | obsolete | | removed | ok |"])
+        note = self.root / "Knowledge/Decisions/auth.md"
+        code, out = self.run_cmd(adopt.cmd_links, notes=[str(note)], write=True)
+        self.assertEqual(code, 1, "an unknown key fails")
+        text = note.read_text(encoding="utf-8")
+        self.assertIn('[cache.md](cache.md "pending")', text)
+        self.assertIn("the old one,", text)
+        self.assertIn("[T](auth.md)", text, "label: the target note's title")
+        self.assertIn('![cache.md](cache.md "pending")', text)
+        self.assertIn("`[[cache]]`", text)
+        self.assertIn('[x](cache.md "pending")', text)
+        self.assertIn("```\n[[cache]]\n```", text)
+        self.assertIn("[[nobody]]", text)
+        self.assertNotIn("wikilink", " ".join(m for p, lvl, m in self.lint() if p.endswith("auth.md") and lvl == "error"))
+        self.note("Decisions/cache.md")
+        code, out = self.run_cmd(adopt.cmd_links, notes=[str(note)], write=True)
+        self.assertIn("pending link resolved", out)
+        self.assertIn("[x](cache.md)", note.read_text(encoding="utf-8"))
+
+
+class AdoptSources(AdoptProject):
+    def git(self, *args: str, cwd: Path | None = None) -> str:
+        res = il.run(["git", "-c", "user.name=Unit", "-c", "user.email=unit@example.com", "-c", "commit.gpgsign=false",
+                      "-c", "init.defaultBranch=master", *args], cwd=cwd or self.root)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        return res.stdout
+
+    def make_old(self) -> Path:
+        old = self.home / "src" / "appOld"
+        server = self.home / "server.git"
+        self.git("init", "--bare", "--quiet", str(server), cwd=self.home)
+        repo = old / "api"
+        repo.mkdir(parents=True)
+        self.git("init", "--quiet", cwd=repo)
+        (repo / ".gitignore").write_text(".env\n", encoding="utf-8")
+        (repo / "README.md").write_text("api\n", encoding="utf-8")
+        self.git("add", "-A", cwd=repo)
+        self.git("commit", "--quiet", "-m", "init", cwd=repo)
+        self.git("remote", "add", "origin", str(server), cwd=repo)
+        self.git("push", "--quiet", "origin", "master", cwd=repo)
+        self.git("checkout", "--quiet", "-b", "gone", cwd=repo)
+        (repo / "g.txt").write_text("g\n", encoding="utf-8")
+        self.git("add", "g.txt", cwd=repo)
+        self.git("commit", "--quiet", "-m", "gone", cwd=repo)
+        self.git("push", "--quiet", "origin", "gone", cwd=repo)
+        self.git("checkout", "--quiet", "master", cwd=repo)
+        self.git("branch", "-D", "--quiet", "gone", cwd=repo)
+        self.git("--git-dir", str(server), "branch", "-D", "--quiet", "gone", cwd=self.home)  # origin/gone is stale now
+        self.git("checkout", "--quiet", "-b", "local", cwd=repo)
+        (repo / "l.txt").write_text("l\n", encoding="utf-8")
+        self.git("add", "l.txt", cwd=repo)
+        self.git("commit", "--quiet", "-m", "local", cwd=repo)
+        (repo / "README.md").write_text("changed\n", encoding="utf-8")
+        (repo / "s.txt").write_text("s\n", encoding="utf-8")
+        self.git("add", "s.txt", cwd=repo)
+        self.git("stash", "--quiet", cwd=repo)
+        (repo / "README.md").write_text("dirty\n", encoding="utf-8")
+        (repo / ".env").write_text("X=1\n", encoding="utf-8")
+        (repo / "CLAUDE.md").write_text("rules\n", encoding="utf-8")
+        (old / "notes.md").write_text("loose\n", encoding="utf-8")
+        (old / "CLAUDE.md").write_text("root rules\n", encoding="utf-8")
+        (old / "_docs").mkdir()
+        (old / "_docs" / "plan.md").write_text("doc\n", encoding="utf-8")
+        mem = self.home / ".claude" / "projects" / adopt_sources.claude_dir_name(old) / "memory"
+        mem.mkdir(parents=True)
+        (mem / "MEMORY.md").write_text("index\n", encoding="utf-8")
+        (mem.parent / "11111111-2222-3333-4444-555555555555.jsonl").write_text(json.dumps(
+            {"type": "user", "message": {"content": "hi DB_PASSWORD=S3cr3tPassw0rd"}, "cwd": str(old),  # agentic:allow-secret
+             "timestamp": "2026-01-01T10:00:00Z"}) + "\n", encoding="utf-8")
+        codex = self.home / ".codex" / "sessions" / "2026" / "rollout-x-66666666-7777-8888-9999-000000000000.jsonl"
+        codex.parent.mkdir(parents=True)
+        codex.write_text(json.dumps({"type": "session_meta", "payload": {"cwd": str(repo)}}) + "\n", encoding="utf-8")
+        return old
+
+    def test_inventory_finds_local_work(self):
+        old = self.make_old()
+        self.start(old)
+        out_dir = self.root / "Runtime/adopt/inv"
+        code, out = self.run_cmd(adopt_sources.cmd_inventory, roots=[], fetch=False, offline=False, depth=3,
+                                 out=str(out_dir), force=False, compare=None)
+        self.assertEqual(code, 0, out)
+        detail = (out_dir / "details" / "appOld__api.txt").read_text(encoding="utf-8")
+        self.assertIn("local +1 (local-only)", detail)
+        self.assertIn("origin/gone +1", detail)
+        self.assertIn("stash@{0}", detail)
+        self.assertIn("M README.md", detail)
+        self.assertIn("!! .env", detail)
+        self.assertIn("?? CLAUDE.md", detail)
+        self.assertIn("appOld/_docs", (out_dir / "nongit.tsv").read_text(encoding="utf-8"))
+        self.assertIn("| appOld/api |", (out_dir / "resources.md").read_text(encoding="utf-8"))
+        self.assertEqual(self.git("status", "--porcelain", cwd=old / "api").count("README.md"), 1)
+        (old / "api" / "new.txt").write_text("n\n", encoding="utf-8")
+        code, out = self.run_cmd(adopt_sources.cmd_inventory, roots=[], fetch=False, offline=True, depth=3,
+                                 out=str(self.root / "Runtime/adopt/inv2"), force=False, compare=str(out_dir))
+        self.assertEqual(code, 1, out)
+        self.assertIn("changed: appOld/api", out)
+
+    def test_sources_and_manifests(self):
+        old = self.make_old()
+        self.start(old)
+        code, out = self.run_cmd(adopt_sources.cmd_sources, vault=[])
+        self.assertEqual(code, 0, out)
+        self.assertIn('kind = "claude-memory"', out)
+        self.assertIn('# kind = "transcripts"', out)
+        self.assertIn('codex_cwd = ["~/src/appOld"]', out)
+        self.assertIn('name = "appold-docs"', out)
+        self.assertIn('kind = "agent-files"', out)
+        self.assertIn('kind = "loose-docs"', out)
+        task = self.add_sources('[[source]]\nname = "docs"\nkind = "docs"\npaths = ["~/src/appOld/_docs"]\n\n'
+                                '[[source]]\nname = "agent-files"\nkind = "agent-files"\n\n'
+                                '[[source]]\nname = "loose"\nkind = "loose-docs"\n\n'
+                                '[[source]]\nname = "talks"\nkind = "transcripts"\n'
+                                f'paths = ["~/.claude/projects/{adopt_sources.claude_dir_name(old)}*"]\n'
+                                'codex_cwd = ["~/src/appOld"]\n')
+        code, out = self.run_cmd(adopt.cmd_manifest, source=None)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(adopt.read_manifest(task, "agent-files"),
+                         ["~/src/appOld/CLAUDE.md", "~/src/appOld/api/CLAUDE.md"])
+        self.assertEqual(adopt.read_manifest(task, "loose"), ["~/src/appOld/notes.md"])
+        talks = adopt.read_manifest(task, "talks")
+        self.assertEqual(len(talks), 2, talks)
+        code, out = self.run_cmd(adopt_sources.cmd_digest, source="talks")
+        self.assertEqual(code, 0, out)
+        digests = self.root / "Runtime/adopt/digests/talks"
+        text = (digests / "11111111-2222-3333-4444-555555555555.md").read_text(encoding="utf-8")
+        self.assertNotIn("S3cr3tPassw0rd", text)
+        self.assertIn("11111111-2222-3333-4444-555555555555\t", (digests / "_secrets.tsv").read_text(encoding="utf-8"))
+
+    def test_refs_report_locations_only(self):
+        old = self.make_old()
+        self.start(old)
+        (self.home / ".gitconfig").write_text(f'[includeIf "gitdir:{old}/"]\n  path = {old}/.gitconfig\n',
+                                             encoding="utf-8")
+        (self.home / ".claude.json").write_text(json.dumps({"projects": {str(old): {"token": "x"}}}), encoding="utf-8")
+        found = adopt_sources.scan_refs([old])
+        self.assertIn(f"~/.gitconfig:1: {old}", found)
+        self.assertIn(f"~/.claude.json: /projects/{old}", found)
+
+
+class AdoptArchive(AdoptProject):
+    def test_archive_is_verified_private_and_never_overwritten(self):
+        src = self.home / "vault"
+        (src / "a").mkdir(parents=True)
+        (src / "a" / "x.md").write_text("x\n", encoding="utf-8")
+        (src / "y.bin").write_bytes(b"\0\1")
+        (src / "link").symlink_to("a")
+        self.start()
+        code, out = self.run_cmd(adopt.cmd_archive, name="old-vault", paths=[str(src)], dir=None)
+        self.assertEqual(code, 0, out)
+        self.assertIn("2 files verified", out)
+        dest = self.home / "Archive" / "old-vault.tgz"
+        if os.name != "nt":
+            self.assertEqual(dest.stat().st_mode & 0o777, 0o600)
+        code, out = self.run_cmd(adopt.cmd_archive, name="old-vault", paths=[str(src)], dir=None)
+        self.assertEqual(code, 1)
+        self.assertIn("already exists", out)
+        code, out = self.run_cmd(adopt.cmd_archive, name="inside", paths=[str(src)], dir=str(self.root / "Runtime"))
+        self.assertIn("outside the project", out)
 
 
 if __name__ == "__main__":
