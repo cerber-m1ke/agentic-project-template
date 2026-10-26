@@ -29,13 +29,16 @@ target = ".claude/settings.json"
 # {name} = hook name. Hooks run in sh (Git Bash on Windows); stdin JSON has `prompt`,
 # stdout of a successful hook is added to the context.
 command = '"$CLAUDE_PROJECT_DIR"/Toolbox/tb hook {name} --agent claude'
+# Tool categories of hooks.toml (`tools`) as Claude Code matchers.
+matchers = { edit = "Write|Edit|MultiEdit|NotebookEdit" }
 events = { session-start = "SessionStart", prompt-submit = "UserPromptSubmit", before-tool = "PreToolUse", after-tool = "PostToolUse", stop = "Stop" }
 
 [permissions]
 target = ".claude/settings.json"
 # Project rules from .agents/permissions.toml are added: a [[command]] prefix becomes
 # Bash(<cmd>) and Bash(<cmd> *) under its decision, [claude] rules are copied as is.
-# Read-only tb commands that need no confirmation.
+# Read-only tb commands that need no confirmation, and `kb commit`: Knowledge is committed right
+# after every edit (only Knowledge/ paths, checked by the pre-commit hook).
 allow = [
     "Bash(Toolbox/tb kb search *)",
     "Bash(Toolbox/tb kb show *)",
@@ -43,6 +46,9 @@ allow = [
     "Bash(Toolbox/tb kb index*)",
     "Bash(Toolbox/tb kb lint*)",
     "Bash(Toolbox/tb kb stale*)",
+    "Bash(Toolbox/tb kb nearby*)",
+    "Bash(Toolbox/tb kb commit *)",
+    "Bash(Toolbox/tb kb session*)",
     "Bash(Toolbox/tb version)",
     "Bash(Toolbox/tb resources status)",
     "Bash(Toolbox/tb agents doctor)",

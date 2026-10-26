@@ -26,6 +26,8 @@ update it instead of creating a duplicate.
 3. **Task finished (`done`).** Distribute the "Takeaways for Knowledge" across Decisions, Gotchas,
    Entities and Examples, and suggest that the human delete the task file — it stays in git history.
 4. **Postponed items and ideas** → Plans: `Toolbox/tb kb new plan <slug> --title "…" --description "…"` (status `idea`).
+   To come back to it soon or by a date → a reminder: `Toolbox/tb kb new reminder <slug> --title "…"`
+   with links to the notes and `due` if the date is known.
 5. **Pitfalls** → Gotchas: `Toolbox/tb kb new gotcha <slug> --title "…" --description "…"` — symptom, cause, workaround,
    how to check it still applies; versions go in `applies_to` (`node@22`).
 6. **Decisions that will outlive the task** → propose an ADR: `Toolbox/tb kb new decision <slug> --title "…" --description "…"`
@@ -33,12 +35,24 @@ update it instead of creating a duplicate.
 7. **Entities.** Learned something new about a service, module or data store (relations, invariants,
    owners) — update its card in Entities or create one: `Toolbox/tb kb new entity <slug> --title "…" --description "…"`.
 8. **Re-verified notes.** If you checked a note against Resources during the session and it is correct,
-   set `verified` to today's date. Fix an outdated note in place. Offer the human to delete a dead one
+   set `verified` to today's date (`Toolbox/tb kb verify <path>`). Fix an outdated note in place. Offer the human to delete a dead one
    (the gotcha's cause is fixed, the decision is replaced, the example or entity is no longer needed):
    Knowledge stores only what is alive, earlier versions are in git history.
-9. **Check.** `Toolbox/tb kb lint`; fix all errors.
-10. **Report to the human:** paths of the notes you created and changed, and what needs their decision
-    (ADRs, note deletion, statuses). Offer to commit via the `kb-commit` skill. Do not commit yourself.
+9. **Check and commit.** `Toolbox/tb kb lint`; fix all errors. Commit your Knowledge edits
+   (skill `kb-commit`); corrections to this session's commits — `--amend`.
+10. **Report to the human:** the commits, paths of the notes you created and changed, and what needs their
+    decision (ADRs, note deletion, statuses).
+11. **What else is nearby.** `Toolbox/tb kb nearby <the session's task>`; without a task —
+    `Toolbox/tb kb nearby --query "<what was done: modules, files, topics>" --resource <resource>`.
+    - Keep only what is really close: the same module or files, a shared cause, the same check. One
+      shared word is not a reason.
+    - Offer to take up the close items (at most three): what it is, why now is convenient, where to do it.
+      In this session — if the work is small and the session's context is still free (no compaction,
+      no long outputs, not many files read). Otherwise — in a new session with a ready short brief: the
+      goal, note paths, resources, what this session already knows.
+    - A reminder has been considered (taken up or declined) — with the human's consent delete it or move
+      `due`, then commit.
+    - Nothing close — say so in one line.
 
 ## Do not record
 

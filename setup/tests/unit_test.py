@@ -1189,6 +1189,250 @@ class AdoptArchive(AdoptProject):
         self.assertIn("outside the project", out)
 
 
+class KbReminders(KnowledgeProject):
+    R = "Knowledge/Reminders/r.md"
+
+    def test_lint(self):
+        self.note("Plans/p.md")
+        self.note("Reminders/r.md", "[P](../Plans/p.md)\n", front="due: 2026-11-01\n")
+        self.assertEqual([p for p in self.lint() if p[0] == self.R], [])
+        self.note("Reminders/r.md", "Nothing linked\n", front="due: soon\n")
+        problems = [p[1:] for p in self.lint() if p[0] == self.R]
+        self.assertIn(("error", "'due' is not a valid date (expected YYYY-MM-DD): 'soon'"), problems)
+        self.assertIn(("warning", "reminder links to no note: link the notes to consider"), problems)
+        self.note("Plans/p.md", front="due: 2026-11-01\n")
+        self.assertIn(("Knowledge/Plans/p.md", "warning", "'due' is meant for reminder notes"), self.lint())
+
+    def test_stale(self):
+        self.note("Plans/p.md", front=f"verified: {date.today().isoformat()}\n")
+        today = date.today()
+        cases = {"past": "due: 2020-01-01\n", "future": "due: 2999-01-01\n", "old": "verified: 2020-01-01\n"}
+        for slug, front in cases.items():
+            self.note(f"Reminders/{slug}.md", "[P](../Plans/p.md)\n", front=front)
+        found = {n.slug: kb.stale_reason(n, today, None) for n in kb.load_notes()}
+        self.assertIn("reminder due", found["past"][1])
+        self.assertIsNone(found["future"])
+        self.assertIn("threshold 14", found["old"][1])
+        self.assertIsNone(found["p"])
+
+    def test_found_by_the_words_of_its_targets(self):
+        self.note("Plans/p.md", front="aliases: [billing]\n")
+        self.note("Reminders/r.md", "[P](../Plans/p.md)\n")
+        hits = kb.run_search("billing", kb.load_notes(), types={"reminder"})
+        self.assertEqual([h.note.rel for h in hits], [self.R])
+
+
+class KbNearby(KnowledgeProject):
+    def test_ranks_by_resource_links_and_words(self):
+        self.note("Tasks/t.md", front="resources: [api/src/billing]\ntags: [billing]\n")
+        self.note("Plans/same-module.md", front="resources: [api/src/billing/invoice]\n")
+        self.note("Plans/other.md", front="resources: [web]\n")
+        self.note("Plans/words.md", front="tags: [billing]\naliases: [invoices]\n")
+        self.note("Reminders/r.md", "[T](../Tasks/t.md)\n")
+        self.note("Gotchas/g.md", front="resources: [api/src/billing]\n")
+        self.write("Knowledge/Tasks/done.md", "---\ntype: task\nstatus: done\ntitle: T\ndescription: D\n"
+                                              "created: 2026-01-01\nresources: [api/src/billing]\n---\n")
+        notes = kb.load_notes()
+        task = next(n for n in notes if n.slug == "t")
+        found = {x.note.slug: x for x in kb.find_nearby([task], notes)}
+        self.assertEqual(set(found), {"same-module", "r", "words"})
+        self.assertIn("resource api/src/billing", found["same-module"].reasons)
+        self.assertIn("links to Knowledge/Tasks/t.md", found["r"].reasons)
+        self.assertIn("tags: billing", found["words"].reasons)
+        by_query = kb.find_nearby([], notes, query="invoices")
+        self.assertEqual([x.note.slug for x in by_query], ["words"])
+
+
+class KbHooks(KnowledgeProject):
+    def setUp(self):
+        super().setUp()
+        import hook
+        self.hook = hook
+
+    def run_hook(self, func, data, agent="claude") -> str:
+        import argparse
+        import contextlib
+        import io
+
+        saved = self.hook.read_input
+        self.hook.read_input = lambda: data
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                func(argparse.Namespace(agent=agent))
+        finally:
+            self.hook.read_input = saved
+        return buf.getvalue()
+
+    def test_suggest_lists_reminders_apart(self):
+        self.note("Plans/p.md", front="aliases: [billing, invoices]\n")
+        self.note("Reminders/r.md", "[P](../Plans/p.md)\n")
+        notes, reminders = self.hook.suggest_all("billing invoices refactoring")
+        self.assertEqual([p for p, _ in notes], ["Knowledge/Plans/p.md"])
+        self.assertEqual([p for p, _ in reminders], ["Knowledge/Reminders/r.md"])
+
+    def test_edited_paths(self):
+        data = {"cwd": str(self.root), "tool_input": {"file_path": str(self.root / "Knowledge/Plans/p.md")}}
+        self.assertEqual(self.hook.edited_paths(data), ["Knowledge/Plans/p.md"])
+        patch = ("*** Begin Patch\n*** Update File: Knowledge/Gotchas/g.md\n@@\n-a\n+b\n"
+                 "*** Add File: Toolbox/x.py\n+x\n*** End Patch\n")
+        self.assertEqual(self.hook.edited_paths({"cwd": str(self.root), "tool_input": {"command": patch}}),
+                         ["Knowledge/Gotchas/g.md"])
+        self.assertEqual(self.hook.edited_paths({"tool_input": {"file_path": "Knowledge/.obsidian/x.json"}}), [])
+
+    def test_track_then_ask_once_to_commit(self):
+        self.git("init", "--quiet")
+        self.note("Plans/p.md")
+        data = {"session_id": "s1", "cwd": str(self.root),
+                "tool_input": {"file_path": "Knowledge/Plans/p.md"}}
+        self.run_hook(self.hook.kb_track, data)
+        stop = {"session_id": "s1"}
+        out = json.loads(self.run_hook(self.hook.kb_uncommitted, stop))
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Knowledge/Plans/p.md", out["reason"])
+        self.assertEqual(self.run_hook(self.hook.kb_uncommitted, stop), "", "asks once per state")
+        self.assertEqual(self.run_hook(self.hook.kb_uncommitted, {"session_id": "s2"}), "", "other session")
+        self.assertEqual(self.run_hook(self.hook.kb_uncommitted, {**stop, "stop_hook_active": True}), "")
+        self.git("add", "--", "Knowledge/Plans/p.md")
+        self.git("commit", "-q", "-m", "x")
+        self.assertEqual(self.run_hook(self.hook.kb_uncommitted, stop), "")
+
+
+class KbCommit(KnowledgeProject):
+    def setUp(self):
+        super().setUp()
+        import kb_git
+        self.kb_git = kb_git
+        saved = os.environ.get(kb_git.SESSION_OVERRIDE)
+        self.addCleanup(lambda: os.environ.pop(kb_git.SESSION_OVERRIDE, None) if saved is None
+                        else os.environ.__setitem__(kb_git.SESSION_OVERRIDE, saved))
+        self.session("claude:A")
+        self.git("init", "--quiet")
+        self.git("config", "user.name", "Unit")
+        self.git("config", "user.email", "unit@example.com")
+        hook = self.write(".agents/git-hooks/pre-commit", "#!/bin/sh\nexit 0\n")
+        hook.chmod(0o755)
+        self.write("README.md", "x\n")
+        self.git("add", "README.md")
+        self.git("commit", "-q", "-m", "init")
+
+    def session(self, value: str) -> None:
+        os.environ[self.kb_git.SESSION_OVERRIDE] = value
+
+    def commit(self, *paths: str, message: list[str] | None = None, amend: bool = False) -> tuple[int, str]:
+        return self.tb(self.kb_git.cmd_commit, paths=list(paths), message=message, amend=amend)
+
+    def log(self) -> list[str]:
+        res = il.run(["git", "log", "--format=%s|%(trailers:key=Agent-Session,valueonly)"], cwd=self.root)
+        return [line for line in res.stdout.splitlines() if line]
+
+    def test_needs_hooks(self):
+        self.note("Plans/a.md")
+        code, out = self.commit("Knowledge/Plans/a.md", message=["Plan a"])
+        self.assertEqual(code, 1)
+        self.assertIn("tb setup", out)
+
+    def test_commit_amend_fixup_squash(self):
+        self.git("config", "core.hooksPath", ".agents/git-hooks")
+        self.assertEqual(self.commit("README.md", message=["x"])[0], 2, "only Knowledge/")
+        self.note("Plans/a.md")
+        self.note("Plans/foreign.md")
+        self.git("add", "--", "Knowledge/Plans/foreign.md")  # staged by another session
+        code, out = self.commit("Plans/a.md", message=["Plan a", "- why"])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.log()[0], "knowledge: Plan a|claude:A")
+        staged = il.run(["git", "diff", "--cached", "--name-only"], cwd=self.root).stdout.split()
+        self.assertEqual(staged, ["Knowledge/Plans/foreign.md"], "the other session's index is kept")
+
+        self.assertIn("tb kb session title", out, "hint to set a title")
+        code, out = self.tb(self.kb_git.cmd_session, session_command="title", text=["Plan", " work "])
+        self.assertEqual((code, out.strip()), (0, "Agent-Session: claude:A (Plan work)"))
+        self.note("Plans/a.md", "Fixed\n")
+        code, out = self.commit("Knowledge/Plans/a.md", amend=True)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Amended", out)
+        self.assertEqual(len(self.log()), 2)
+
+        self.session("claude:B")
+        self.assertEqual(self.commit("Knowledge/Plans/foreign.md", message=["Foreign"])[0], 0)
+        self.session("claude:A")
+        self.note("Plans/a.md", "Fixed again\n")
+        code, out = self.commit("Knowledge/Plans/a.md", amend=True)
+        self.assertEqual(code, 0, out)
+        self.assertIn("Fixup committed", out)
+        self.assertEqual(self.log()[0], "fixup! knowledge: Plan a|claude:A (Plan work)")
+
+        self.note("Plans/b.md")
+        code, out = self.commit("Knowledge/Plans/b.md", amend=True)
+        self.assertEqual(code, 2, "nothing of this session to correct and no message")
+
+        self.write("README.md", "dirty\n")
+        self.assertEqual(self.tb(self.kb_git.cmd_squash, dry_run=False)[0], 1, "dirty tree")
+        self.write("README.md", "x\n")
+        code, out = self.tb(self.kb_git.cmd_squash, dry_run=False)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.log(), ["knowledge: Foreign|claude:B", "knowledge: Plan a|claude:A", "init|"],
+                         "amend without -m keeps the message written before the title was set")
+        shown = il.run(["git", "show", "HEAD~1:Knowledge/Plans/a.md"], cwd=self.root).stdout
+        self.assertIn("Fixed again", shown)
+
+    def test_deleted_note(self):
+        self.git("config", "core.hooksPath", ".agents/git-hooks")
+        self.note("Plans/a.md")
+        self.assertEqual(self.commit("Knowledge/Plans/a.md", message=["Plan a"])[0], 0)
+        (self.root / "Knowledge/Plans/a.md").unlink()
+        code, out = self.commit("Knowledge/Plans/a.md", message=["Drop plan a"])
+        self.assertEqual(code, 0, out)
+        files = il.run(["git", "ls-files", "Knowledge"], cwd=self.root).stdout
+        self.assertEqual(files, "")
+
+
+class HookMatchers(_ToolboxProject):
+    HOOKS = ('[[hook]]\nname = "kb-track"\nevent = "after-tool"\ntools = "edit"\n\n'
+             '[[hook]]\nname = "kb-uncommitted"\nevent = "stop"\n')
+
+    def render(self, agent: str) -> tuple[dict, list[str]]:
+        import adapters
+        manifest = resources.common.load_toml(
+            TEMPLATE_ROOT / "payload/modules/core/.agents/adapters" / agent / "adapter.toml")
+        ctx = adapters.load_context(self.root, agent, manifest)
+        return adapters.render(ctx), ctx.warnings
+
+    def test_matcher_or_skip(self):
+        self.write(".agents/hooks/hooks.toml", self.HOOKS)
+        files, warnings = self.render("claude")
+        hooks = json.loads(files[".claude/settings.json"])["hooks"]
+        self.assertEqual(hooks["PostToolUse"][0]["matcher"], "Write|Edit|MultiEdit|NotebookEdit")
+        self.assertNotIn("matcher", hooks["Stop"][0])
+        self.assertEqual(warnings, [])
+        files, warnings = self.render("codex")
+        hooks = json.loads(files[".codex/hooks.json"])["hooks"]
+        self.assertNotIn("PostToolUse", hooks)
+        self.assertIn("Stop", hooks)
+        self.assertTrue(any("kb-track" in w for w in warnings), warnings)
+
+
+class MigrationCommitHooks(unittest.TestCase):
+    def test_appends_missing_hooks_once(self):
+        migration = TEMPLATE_ROOT / il.MIGRATIONS_DIR / "0.5.0_knowledge-commit-hooks.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            il.run_migration(migration, root)  # no hooks.toml: nothing to do
+            self.assertFalse((root / ".agents").exists())
+            path = root / ".agents/hooks/hooks.toml"
+            path.parent.mkdir(parents=True)
+            path.write_text('[[hook]]\nname = "kb-suggest"\nevent = "prompt-submit"\n\n'
+                            '[[hook]]\nname = "kb-track"\nevent = "after-tool"\n', encoding="utf-8")
+            il.run_migration(migration, root)
+            first = path.read_text(encoding="utf-8")
+            self.assertEqual(first.count('name = "kb-track"'), 1)
+            self.assertEqual(first.count('name = "kb-uncommitted"'), 1)
+            il.run_migration(migration, root)
+            self.assertEqual(path.read_text(encoding="utf-8"), first)
+            import tomllib
+            self.assertEqual(len(tomllib.loads(first)["hook"]), 3)
+
+
 if __name__ == "__main__":
     os.environ.setdefault("AGENTIC_ROOT", str(TEMPLATE_ROOT))
     unittest.main(verbosity=1)

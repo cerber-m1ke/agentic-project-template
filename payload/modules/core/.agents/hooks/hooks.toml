@@ -7,13 +7,16 @@
 #   name = "kb-suggest"        # handler name: the agent runs `Toolbox/tb hook <name> --agent <agent>`
 #   event = "prompt-submit"    # see the events below
 #   description = "…"          # what the hook does (for humans)
+#   tools = "edit"             # optional, before-tool/after-tool: only these tools (adapter.toml
+#                              # [hooks] matchers); an agent without the matcher skips the hook
 #
 # Events:
 #   session-start   a session starts or resumes
 #   prompt-submit   the user sends a prompt (stdout of the handler is added to the context)
 #   before-tool     before a tool call
 #   after-tool      after a tool call
-#   stop            the agent finishes a response (fires after EVERY response)
+#   stop            the agent finishes a response (fires after EVERY response); stdout
+#                   {"decision": "block", "reason": "…"} makes the agent continue with the reason
 #
 # An event the agent does not support is skipped with a warning. Codex asks the user
 # to approve new hooks once in /hooks.
@@ -22,3 +25,14 @@
 name = "kb-suggest"
 event = "prompt-submit"
 description = "Add titles and paths of Knowledge notes matching the prompt to the context."
+
+[[hook]]
+name = "kb-track"
+event = "after-tool"
+tools = "edit"
+description = "Remember the Knowledge files this session edits (Runtime/sessions/)."
+
+[[hook]]
+name = "kb-uncommitted"
+event = "stop"
+description = "Ask the agent once to commit Knowledge files it edited and left uncommitted."

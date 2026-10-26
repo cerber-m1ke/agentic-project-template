@@ -32,6 +32,7 @@ KNOWLEDGE_TYPES: dict[str, dict[str, Any]] = {
     "gotcha": {"folder": "Gotchas", "statuses": ()},
     "plan": {"folder": "Plans", "statuses": ("idea", "ready")},
     "task": {"folder": "Tasks", "statuses": ("active", "blocked", "done")},
+    "reminder": {"folder": "Reminders", "statuses": ()},
 }
 # Statuses retired in 0.2.0: they marked dead notes, which are deleted now.
 RETIRED_STATUSES: dict[str, tuple[str, ...]] = {

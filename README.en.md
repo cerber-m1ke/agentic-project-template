@@ -39,7 +39,8 @@ freely between machines and people.
   Knowledge is pulled in on demand through search.
 - **No empty directories.** Each one holds a README with its rules — which doubles as instructions for
   the Agent.
-- **A human confirms anything irreversible:** initialization, updates, commits.
+- **A human confirms anything irreversible:** initialization, updates, commits outside Knowledge. The Agent
+  commits Knowledge edits right away and reports them, marked with the session that made them.
 
 ## Requirements
 
@@ -115,7 +116,7 @@ The template URL is saved in `.agents/agentic.lock` — the project is updated f
 ├── Knowledge/                # Obsidian vault
 │   ├── README.md             # general Knowledge rules
 │   ├── _templates/           # note templates (tb kb new + Obsidian)
-│   └── Decisions/ Entities/ Examples/ Gotchas/ Plans/ Tasks/   # each has a README.md with rules
+│   └── Decisions/ Entities/ Examples/ Gotchas/ Plans/ Tasks/ Reminders/   # each has a README.md with rules
 ├── Resources/
 │   ├── README.md             # rules for working with resources
 │   ├── resources.toml        # the project's resource catalog
@@ -193,8 +194,9 @@ catalog resources are missing (`--clone-missing` clones them). The same command 
 environment after `Runtime/` has been deleted and connects a new agent (`--agents`).
 
 **Work.** At the start of a session the Agent reads `AGENTS.md`, searches Knowledge before making
-decisions (`kb-lookup`), wraps up at the end (`wrap-up`) and periodically runs reviews (`kb-review`, `plan-review`).
-It commits only when you ask.
+decisions (`kb-lookup`), wraps up at the end (`wrap-up`) and offers to take up nearby reminders, plans
+and tasks, periodically runs reviews (`kb-review`, `plan-review`). It commits Knowledge right away, everything
+else only when you ask.
 
 **Update.** Ask the Agent to update the project — the `agentic-update` skill kicks in. `tb update fetch`
 downloads the latest template release into `Runtime/update/<version>/`, and the Agent follows

@@ -50,9 +50,18 @@ STALE_RULES: dict[str, tuple[int, tuple[str, ...] | None]] = {
     "entity": (180, None),
     "example": (180, None),
     "plan": (60, ("idea", "ready")),
-    "task": (30, ("active", "blocked")),
+    "task": (14, ("active", "blocked")),
     "decision": (30, ("proposed",)),
+    "reminder": (14, None),  # a reminder with `due` waits for that date instead
 }
+
+# tb kb nearby: candidates for "take it up while we are in this context".
+NEARBY_CANDIDATES: dict[str, tuple[str, ...] | None] = {
+    "reminder": None,
+    "plan": ("idea", "ready"),
+    "task": ("active", "blocked"),
+}
+NEARBY_MIN_SCORE = 1.5
 
 _FM_RE = re.compile(r"\A---[ \t]*\n(.*?)\n---[ \t]*(?:\n|\Z)", re.DOTALL)
 _WORD_RE = re.compile(r"\w+")
@@ -210,6 +219,14 @@ def is_note_parts(parts: tuple[str, ...]) -> bool:
     if any(part.startswith(".") for part in parts[:-1]) or (len(parts) > 1 and parts[0] == TEMPLATES_DIR):
         return False
     return not (parts[0] == "Tasks" and len(parts) >= 3 and not (len(parts) == 3 and name == "index.md"))
+
+
+def _is_note_path(path: Path) -> bool:
+    try:
+        parts = Path(os.path.relpath(path, knowledge_dir())).parts
+    except ValueError:  # another drive on Windows
+        return False
+    return bool(parts) and parts[0] != ".." and is_note_parts(parts)
 
 
 def note_files(kdir: Path) -> list[tuple[Path, tuple[str, ...]]]:
@@ -426,17 +443,34 @@ class Analyzer:
         return out
 
 
-def note_fields(note: Note) -> dict[str, str]:
-    def joined(key: str) -> str:
-        return " ".join(str(x) for x in note.list_field(key) if not isinstance(x, (dict, list)))
+def _joined(note: Note, key: str) -> str:
+    return " ".join(str(x) for x in note.list_field(key) if not isinstance(x, (dict, list)))
 
-    return {
+
+def note_fields(note: Note, targets: list[Note] = ()) -> dict[str, str]:
+    """Search fields. `targets`: notes a reminder points to — a reminder is found by their words too."""
+    fields = {
         "title": str(note.meta.get("title") or ""),
-        "aliases": joined("aliases") + " " + note.slug.replace("-", " "),
-        "tags": joined("tags"),
+        "aliases": _joined(note, "aliases") + " " + note.slug.replace("-", " "),
+        "tags": _joined(note, "tags"),
         "description": note.description,
         "body": note.body,
     }
+    for t in targets:
+        fields["aliases"] += f" {t.meta.get('title') or ''} {_joined(t, 'aliases')}"
+        fields["tags"] += " " + _joined(t, "tags")
+        fields["body"] += "\n" + t.description
+    return fields
+
+
+def linked_notes(note: Note, by_key: dict[str, Note]) -> list[Note]:
+    """Existing notes this note links to (each once)."""
+    found: dict[str, Note] = {}
+    for link in note.links:
+        other = by_key.get(_key(link.path))
+        if other is not None and other is not note:
+            found.setdefault(other.rel, other)
+    return list(found.values())
 
 
 @dataclass
@@ -455,10 +489,12 @@ class SearchIndex:
         self.postings: dict[str, list[tuple[int, float]]] = defaultdict(list)
         self.strong_terms: list[set[str]] = []
         self.lengths: list[float] = []
+        by_key = {_key(n.path): n for n in notes} if any(n.type == "reminder" for n in notes) else {}
         for i, note in enumerate(notes):
             tf: dict[str, float] = defaultdict(float)
             length, strong = 0.0, set()
-            for name, text in note_fields(note).items():
+            targets = linked_notes(note, by_key) if note.type == "reminder" else []
+            for name, text in note_fields(note, targets).items():
                 if not text:
                     continue
                 w = FIELD_WEIGHTS[name]
@@ -1022,6 +1058,14 @@ def lint_note(note: Note, slugs: dict[str, list[Note]], resource_names: Collecti
                 warn(f"'{key}' is in the future: {d.isoformat()}")
         if "created" in dates and "verified" in dates and dates["verified"] < dates["created"]:
             warn("'verified' is earlier than 'created'")
+        if meta.get("due") not in (None, ""):
+            if ntype != "reminder":
+                warn("'due' is meant for reminder notes")
+            elif as_date(meta["due"]) is None:
+                err(f"'due' is not a valid date (expected YYYY-MM-DD): '{meta['due']}'")
+        if ntype == "reminder" and not any(
+                link.exists and not link.image and _is_note_path(link.path) for link in note.links):
+            warn("reminder links to no note: link the notes to consider")
         for key in LIST_KEYS:
             v = meta.get(key)
             if v is not None and not isinstance(v, list):
@@ -1298,6 +1342,12 @@ def stale_reason(note: Note, today: date, days_override: int | None) -> tuple[in
         return 10 ** 6, "harvest pending (task is done: move lasting results to Knowledge, then delete it)"
     if note.status and note.status in common.RETIRED_STATUSES.get(note.type, ()):
         return 10 ** 6, f"retired status '{note.status}' (the note is obsolete: delete it)"
+    if note.type == "reminder" and (due := as_date(note.meta.get("due"))) is not None:
+        if due > today:
+            return None
+        late = (today - due).days
+        return late, ("reminder due today" if not late else f"reminder due {late} days ago") + \
+            " (consider the linked notes, then delete the reminder or move 'due')"
     rule = STALE_RULES.get(note.type)
     if rule is None:
         return None
@@ -1350,6 +1400,113 @@ def cmd_stale(args: argparse.Namespace) -> int:
     found.sort(key=lambda x: (-x[0], x[1].rel))
     for _age, n, reason in found:
         common.out(f"{n.rel}  [{n.label}]  {reason}")
+    return 0
+
+
+# --- nearby ----------------------------------------------------------------------------------------------
+
+@dataclass
+class Near:
+    note: Note
+    score: float
+    reasons: list[str]
+
+
+def _resource_score(note: Note, context: list[tuple[str, str]]) -> tuple[float, str | None]:
+    """2 for a shared module (one subpath inside the other), 1 for a shared resource."""
+    best, why = 0.0, None
+    for name, sub in note.resource_refs():
+        for cname, csub in context:
+            if name != cname:
+                continue
+            if sub and csub and (sub == csub or sub.startswith(csub + "/") or csub.startswith(sub + "/")):
+                score, label = 2.0, f"{name}/{min(sub, csub, key=len)}"
+            else:
+                score, label = 1.0, name
+            if score > best:
+                best, why = score, label
+    return best, why
+
+
+def find_nearby(sources: list[Note], notes: list[Note], *, query: str = "",
+                resources: list[str] = (), limit: int = 5) -> list[Near]:
+    """Reminders, open plans and tasks close to the context of `sources` (+ query, + resources):
+    shared resources (a module counts more), links either way, shared tags and BM25 on the words."""
+    source_keys = {_key(n.path) for n in sources}
+    by_key = {_key(n.path): n for n in notes}
+
+    def candidate(n: Note) -> bool:
+        if n.type not in NEARBY_CANDIDATES or _key(n.path) in source_keys:
+            return False
+        statuses = NEARBY_CANDIDATES[n.type]
+        return statuses is None or n.status in statuses
+
+    context_res = [ref for n in sources for ref in n.resource_refs()]
+    context_res += [r for r in (resource_ref(x) for x in resources) if r]
+    context_tags = {str(t).lower() for n in sources for t in n.list_field("tags")}
+    linked_from = {_key(l.path): n for n in sources for l in n.links}
+    # The body of a long task drowns the query in common words: search by the headline fields only.
+    words = " ".join([query, *(" ".join(v for k, v in note_fields(n).items() if k != "body")
+                               for n in sources)])
+    text_hits: dict[str, Hit] = {}
+    top = 0.0
+    if words.strip():
+        hits, _ = SearchIndex(notes).search(words, candidate)
+        text_hits = {h.note.rel: h for h in hits if h.strong}
+        top = max((h.score for h in text_hits.values()), default=0.0)
+    result = []
+    for n in notes:
+        if not candidate(n):
+            continue
+        score, reasons = 0.0, []
+        res, why = _resource_score(n, context_res)
+        if res:
+            score += res
+            reasons.append(f"resource {why}")
+        if (src := linked_from.get(_key(n.path))) is not None:
+            score += 3.0
+            reasons.append(f"linked from {src.rel}")
+        if targets := [t for t in linked_notes(n, by_key) if _key(t.path) in source_keys]:
+            score += 3.0
+            reasons.append("links to " + ", ".join(t.rel for t in targets))
+        if shared := sorted(context_tags & {str(t).lower() for t in n.list_field("tags")}):
+            score += min(0.5 * len(shared), 1.5)
+            reasons.append("tags: " + ", ".join(shared))
+        if (hit := text_hits.get(n.rel)) is not None and top:
+            score += 2.0 * hit.score / top
+            reasons.append("words: " + ", ".join(sorted(hit.matched)[:6]))
+        if score >= NEARBY_MIN_SCORE:
+            result.append(Near(n, score, reasons))
+    result.sort(key=lambda x: (-x.score, x.note.rel))
+    return result[:max(limit, 0)]
+
+
+def cmd_nearby(args: argparse.Namespace) -> int:
+    query = args.query.strip()
+    if not (args.refs or query or args.resource):
+        return common.fail("give notes (path or slug), --query or --resource", 2)
+    notes = load_notes()
+    sources = []
+    for ref in args.refs:
+        path, code = _find_note(ref, notes)
+        if path is None:
+            return code
+        sources.extend(n for n in notes if n.path == path)
+    found = find_nearby(sources, notes, query=query, resources=args.resource or [], limit=args.limit)
+    today = date.today()
+    if args.json:
+        common.print_json([{"path": x.note.rel, "type": x.note.type, "status": x.note.status,
+                            "title": x.note.title, "due": str(x.note.meta.get("due") or "") or None,
+                            "score": round(x.score, 2), "reasons": x.reasons} for x in found])
+        return 0
+    if not found:
+        common.out("Nothing nearby.")
+        return 0
+    for x in found:
+        due = as_date(x.note.meta.get("due"))
+        mark = f"  due {due.isoformat()}{' (overdue)' if due < today else ''}" if due else ""
+        common.out(f"{x.note.rel}  [{x.note.label}]  {x.note.title}{mark}")
+        common.out(f"    {round(x.score, 1)}: {'; '.join(x.reasons)}")
     return 0
 
 
@@ -1407,5 +1564,16 @@ def register(sub) -> None:
     st = s.add_parser("stale", help="notes due for review (old `verified`, pending links)")
     st.add_argument("--days", type=int, help="use this threshold (days) for every type")
     st.set_defaults(func=cmd_stale)
+
+    nb = s.add_parser("nearby", help="reminders, open plans and tasks close to the given notes or words")
+    nb.add_argument("refs", nargs="*", metavar="ref", help="context notes: path or slug (e.g. the session's task)")
+    nb.add_argument("--query", default="", metavar="TEXT", help="context words: what was done, files, modules (quoted)")
+    nb.add_argument("--resource", action="append", metavar="NAME[/SUBPATH]", help="context resource (repeatable)")
+    nb.add_argument("--limit", type=int, default=5, help="max results (default 5)")
+    nb.add_argument("--json", action="store_true", help="JSON output")
+    nb.set_defaults(func=cmd_nearby)
+
+    import kb_git
+    kb_git.register(s)
 
     p.set_defaults(func=lambda _a: (p.print_help(), 0)[1])

@@ -35,6 +35,9 @@ target = ".codex/hooks.json"
 # {tb_cmd} = Toolbox\tb.cmd (relative and unquoted: valid in both cmd and PowerShell, but only
 # when the session starts in the project root). New hooks must be approved once in /hooks.
 command = "{tb_find} hook {name} --agent codex"
+# Tool categories of hooks.toml (`tools`) as matchers. No `edit` yet: which edit tools Codex hooks
+# see is not verified, so hooks limited to edits (kb-track) are skipped with a warning.
+matchers = {}
 command_windows = "{tb_cmd} hook {name} --agent codex"
 timeout = 30
 events = { session-start = "SessionStart", prompt-submit = "UserPromptSubmit", before-tool = "PreToolUse", after-tool = "PostToolUse", stop = "Stop" }

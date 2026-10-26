@@ -16,7 +16,7 @@
 - Постоянная память — только `Knowledge/`. Встроенную память агента не используй.
 - В Знания пиши только то, что не выводится из Ресурсов и истории git. Одна заметка — одна тема: сначала найди и обнови существующую. Правила — `Knowledge/README.md`.
 - Временные файлы и одноразовые скрипты — только в `Runtime/`, постоянные инструменты — в `Toolbox/` с записью в `Toolbox/README.md`.
-- Коммить только по просьбе человека, явными путями (не `git add -A`/`.`). Сообщение: `<scope>: <суть>` + тезисы; scope — `knowledge|agents|toolbox|resources|agentic`. Хук pre-commit не обходи и не отключай (`--no-verify`, `commit-tree`): он ловит секреты.
+- Знания коммить сразу после правки (skill `kb-commit`) и сообщи человеку. Остальное — только по просьбе, явными путями (не `git add -A`/`.`): `<scope>: <суть>` + тезисы, scope — `knowledge|agents|toolbox|resources|agentic`. Хук pre-commit не обходи и не отключай (`--no-verify`, `commit-tree`): он ловит секреты.
 - Не правь `.agents/agentic.lock` и генерируемые `.claude/`, `.codex/`, `CLAUDE.md`: меняй `.agents/`, затем `Toolbox/tb agents link`.
 - Нужного ресурса нет в `Resources/` — предложи `Toolbox/tb resources clone <name>`.
 - Секреты не пиши в `Knowledge/`, `Toolbox/`, `.agents/`.

@@ -19,7 +19,11 @@ regularly (skills `kb-review` and `plan-review`).
   and `Toolbox/tb kb stale` lists the note as a candidate for completion. Once the target exists, remove the `"pending"` title.
 - No secrets (tokens, passwords, keys) and no real customer or user data: no exports, no personal data.
 - Do not maintain an index by hand: `Toolbox/tb kb index` builds it from frontmatter.
-- The main Agent writes to Knowledge (the librarian only reads); commit only when a human asks (skill `kb-commit`).
+- The main Agent writes to Knowledge (the librarian only reads). It commits each edit right away and tells
+  the human (skill `kb-commit`): `Toolbox/tb kb commit` takes only the given paths and signs the commit with
+  the `Agent-Session` trailer. With parallel sessions this shows which one wrote what. A correction to its
+  own recent commit (a plan, pitfall or decision was cancelled) goes into that same commit (`--amend`),
+  not a new one.
 
 ## Note types
 
@@ -31,9 +35,10 @@ regularly (skills `kb-review` and `plan-review`).
 | `gotcha` | [Gotchas](Gotchas/README.md) | Pitfalls: symptom, cause, workaround, how to check it still applies | — | While the cause exists |
 | `plan` | [Plans](Plans/README.md) | Ideas, postponed work, things discovered along the way | `idea`, `ready` | Until it becomes a task or is dropped |
 | `task` | [Tasks](Tasks/README.md) | The current task: goal, specification, decisions along the way, progress, takeaways | `active`, `blocked`, `done` | Until its takeaways are harvested |
+| `reminder` | [Reminders](Reminders/README.md) | What to consider soon: links to notes, plans, tasks; why and when | — | Until considered |
 
 The end of a note's life is its deletion: a superseded decision, a fixed pitfall, an outdated example,
-a rejected plan, the card of a retired entity. Anything important from the deleted note moves to a live one
+a rejected plan, the card of a retired entity, a considered reminder. Anything important from the deleted note moves to a live one
 (for example, why the previous decision was abandoned goes to "Alternatives" of the new one).
 
 Decisions made within a task live in the task and go away with it. Only decisions that outlive the
@@ -43,7 +48,7 @@ task go to Decisions.
 
 ```yaml
 ---
-type: gotcha               # decision | entity | example | gotcha | plan | task
+type: gotcha               # decision | entity | example | gotcha | plan | task | reminder
 title: "uv cannot download Python behind a proxy"
 description: "SSL error in tb setup behind a corporate proxy"   # one line: used to search and to decide whether to open the note
 # status: active           # gotcha and example have none; for other types values depend on the type
@@ -53,6 +58,7 @@ tags: [uv, network]
 aliases: [proxy, https-proxy]   # synonyms, also in other languages — for search
 resources: [api, api/src/billing]   # names from Resources/resources.toml, optionally with a subpath
 applies_to: [uv@0.12]      # gotcha and example only: which versions it applies to
+due: 2026-11-01            # reminder only: when to consider it
 ---
 ```
 
@@ -75,7 +81,8 @@ Plans (idea) ──► Tasks (active) ──► done ──► harvest ──►
 
 Takeaways are harvested by the skill `wrap-up`; a deleted note remains in git history. `Toolbox/tb kb stale`
 suggests re-checking a note when `verified` (or `created`) is older than a threshold: gotcha — 90 days,
-entity and example — 180, plan (`idea`, `ready`) — 60, task (`active`, `blocked`) — 30, decision (`proposed`) — 30.
+entity and example — 180, plan (`idea`, `ready`) — 60, task (`active`, `blocked`) — 14, decision (`proposed`) — 30,
+reminder — 14, and a reminder with `due` — on the `due` date.
 A task with status `done` is always listed: its takeaways have not been harvested yet. So is a note with
 a retired status (`superseded`, `resolved`, `outdated`, `dropped`): it is dead and due for deletion.
 So is a note with pending links (`"pending"`): it is due for completion.
@@ -92,6 +99,9 @@ So is a note with pending links (`"pending"`): it is due for completion.
 | `Toolbox/tb kb lint` | Frontmatter, links, file names, the Resources catalog, `AGENTS.md` budget |
 | `Toolbox/tb kb verify <path\|slug>…` | Record a check: `verified` set to today, notes linted |
 | `Toolbox/tb kb stale` | Candidates for re-checking and completion |
+| `Toolbox/tb kb nearby [<path\|slug>…] [--query TEXT] [--resource R]` | Reminders, open plans and tasks close to the context |
+| `Toolbox/tb kb commit <paths>… -m "…" [--amend]` | Commit Knowledge right after an edit, with the authoring session |
+| `Toolbox/tb kb squash [--dry-run]` | Fold `fixup!` corrections into their commits (clean tree, not pushed) |
 
 On Windows (PowerShell): `Toolbox\tb.cmd kb …`.
 

@@ -22,7 +22,9 @@ finished when:
 - You do not start working on a plan. Create a task, delete, merge or change a status only after
   the human confirms.
 - Checking against Resources is read-only, as in `kb-review`.
-- Do not commit: at the end offer the `kb-commit` skill.
+- Commit what you applied right away (skill `kb-commit`) and name the commits to the human.
+- Reminders (`Knowledge/Reminders/`) about a plan are part of its verdict: the plan is deleted or taken
+  into a task — delete the reminder or move its link to the task.
 
 ## Verdicts
 
@@ -71,7 +73,7 @@ finished when:
 6. **Report.** Show the report in the format below and wait for confirmation. Ask which plans to take up.
 7. **Apply** only what was confirmed. Kept plans — `Toolbox/tb kb verify <paths>` (do not edit `verified`
    by hand). Then `Toolbox/tb kb lint` with no errors.
-8. **Wrap up.** Counts per verdict, tasks created, open questions. Offer the `kb-commit` skill.
+8. **Wrap up.** Counts per verdict, tasks created, commits, open questions.
 
 ## Acceptance criteria
 

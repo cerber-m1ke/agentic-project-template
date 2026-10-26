@@ -57,6 +57,7 @@ class Hook:
     name: str
     event: str
     description: str = ""
+    tools: str = ""        # tool category the hook is limited to (before-tool/after-tool): "" = all, edit
 
 
 @dataclass
@@ -208,7 +209,8 @@ def _load_hooks(root: Path, warnings: list[str]) -> list[Hook]:
             warnings.append(f"{HOOKS_FILE}: hook {name!r}: unknown event {event!r} "
                             f"(expected {' | '.join(EVENTS)}); skipped")
             continue
-        result.append(Hook(name=name, event=event, description=str(item.get("description", ""))))
+        result.append(Hook(name=name, event=event, description=str(item.get("description", "")),
+                           tools=str(item.get("tools", ""))))
     return result
 
 
@@ -398,6 +400,7 @@ def hook_command(template: str, hook: Hook, ctx: Context) -> str:
 def hooks_by_event(ctx: Context) -> dict[str, list[Hook]]:
     """Canonical hooks grouped by the agent's native event name (unsupported ones -> warning)."""
     events = ctx.section("hooks").get("events", {})
+    matchers = ctx.section("hooks").get("matchers", {})
     grouped: dict[str, list[Hook]] = {}
     for hook in ctx.hooks:
         native = events.get(hook.event)
@@ -405,8 +408,21 @@ def hooks_by_event(ctx: Context) -> dict[str, list[Hook]]:
             ctx.warnings.append(f"hook {hook.name!r}: event {hook.event!r} is not supported by "
                                 f"{ctx.agent}; skipped")
             continue
+        if hook.tools and not matchers.get(hook.tools):
+            ctx.warnings.append(f"hook {hook.name!r}: tools {hook.tools!r} have no matcher for "
+                                f"{ctx.agent}; skipped")
+            continue
         grouped.setdefault(native, []).append(hook)
     return dict(sorted(grouped.items()))
+
+
+def matcher_groups(ctx: Context, hooks: list[Hook]) -> list[tuple[str | None, list[Hook]]]:
+    """Hooks of one native event split by tool matcher (None = every tool), in first-seen order."""
+    matchers = ctx.section("hooks").get("matchers", {})
+    groups: dict[str | None, list[Hook]] = {}
+    for hook in hooks:
+        groups.setdefault(matchers.get(hook.tools) if hook.tools else None, []).append(hook)
+    return list(groups.items())
 
 
 def tier_value(ctx: Context, section: str, key: str, tier: str | None, what: str) -> str | None:

@@ -11,6 +11,7 @@ seeded = [
     "Knowledge/_templates/gotcha.md",
     "Knowledge/_templates/plan.md",
     "Knowledge/_templates/task.md",
+    "Knowledge/_templates/reminder.md",
 ]
 block = []
 executable = []

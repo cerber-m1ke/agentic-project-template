@@ -16,7 +16,7 @@
 - Persistent memory is `Knowledge/` only. Do not use the agent's built-in memory.
 - Write to Knowledge only what cannot be derived from Resources and git history. One note — one topic: find and update an existing note first. Rules — `Knowledge/README.md`.
 - Temporary files and one-off scripts go only in `Runtime/`, permanent tools in `Toolbox/` with an entry in `Toolbox/README.md`.
-- Commit only when the human asks, with explicit paths (no `git add -A`/`.`). Message: `<scope>: <summary>` + bullet points; scope — `knowledge|agents|toolbox|resources|agentic`. Never bypass or disable the pre-commit hook (`--no-verify`, `commit-tree`): it catches secrets.
+- Commit Knowledge right after each edit (skill `kb-commit`) and tell the human. Everything else — only when the human asks, with explicit paths (no `git add -A`/`.`): `<scope>: <summary>` + bullet points, scope — `knowledge|agents|toolbox|resources|agentic`. Never bypass or disable the pre-commit hook (`--no-verify`, `commit-tree`): it catches secrets.
 - Do not edit `.agents/agentic.lock` or the generated `.claude/`, `.codex/`, `CLAUDE.md`: change `.agents/`, then run `Toolbox/tb agents link`.
 - A needed resource is missing from `Resources/` — suggest `Toolbox/tb resources clone <name>`.
 - Never write secrets to `Knowledge/`, `Toolbox/`, `.agents/`.

@@ -22,6 +22,8 @@ a short answer in a strict format. Work from the project root.
    Search with keywords, not the whole question. Try 2–3 phrasings: synonyms, terms in English
    and in the team's other languages, the resource or library name, a fragment of the error text. Filters as
    the situation requires: `--type gotcha` for an error, `--type decision` before a decision, `--resource <name>`, `--brief`.
+   Reminders: `Toolbox/tb kb search --type reminder <the same words>` — which overlapping items are due
+   for consideration; their paths go to the "Reminders" line.
 2. **Read.** Open the 1–3 best matches in full: `Toolbox/tb kb show <path>`; related notes —
    `Toolbox/tb kb related <path>`. Take `status` and `verified` into account.
 3. **Verify against Resources** — the key claims, not everything:
@@ -40,6 +42,7 @@ Answer: <the gist of the answer: facts, commands, names — briefly>
 Sources: Knowledge/Gotchas/<slug>.md, Knowledge/Entities/<slug>.md
 Verification: confirmed | stale? | unverifiable (why)
 Knowledge suggestions: <what to update, mark, create> | none
+Reminders: <paths of reminders that overlap the question> | none
 ```
 
 - `confirmed` — the key claims are confirmed by Resources.
@@ -57,4 +60,5 @@ Answer: nothing found (queries: "…", "…", "…")
 Sources: —
 Verification: —
 Knowledge suggestions: <create a note once the answer is found> | none
+Reminders: <paths> | none
 ```

@@ -13,7 +13,7 @@ import json
 from typing import Any
 
 from adapters import (GENERATED_NOTE, PERMISSIONS_FILE, Context, dump_json, dump_toml, hook_command,
-                      hooks_by_event, tier_value)
+                      hooks_by_event, matcher_groups, tier_value)
 
 
 def _config(ctx: Context) -> dict[str, dict[str, Any]]:
@@ -48,16 +48,18 @@ def _hooks(ctx: Context) -> dict[str, Any] | None:
         return None
     native: dict[str, list] = {}
     for event, items in grouped.items():
-        handlers = []
-        for hook in items:
-            handler: dict[str, Any] = {"type": "command",
-                                       "command": hook_command(hooks["command"], hook, ctx)}
-            if hooks.get("command_windows"):
-                handler["commandWindows"] = hook_command(hooks["command_windows"], hook, ctx)
-            if hooks.get("timeout"):
-                handler["timeout"] = int(hooks["timeout"])
-            handlers.append(handler)
-        native[event] = [{"hooks": handlers}]
+        native[event] = []
+        for matcher, group in matcher_groups(ctx, items):
+            handlers = []
+            for hook in group:
+                handler: dict[str, Any] = {"type": "command",
+                                           "command": hook_command(hooks["command"], hook, ctx)}
+                if hooks.get("command_windows"):
+                    handler["commandWindows"] = hook_command(hooks["command_windows"], hook, ctx)
+                if hooks.get("timeout"):
+                    handler["timeout"] = int(hooks["timeout"])
+                handlers.append(handler)
+            native[event].append({"matcher": matcher, "hooks": handlers} if matcher else {"hooks": handlers})
     # `description` is optional metadata in Codex hooks.json: the only place for the note.
     return {"description": GENERATED_NOTE, "hooks": native}
 

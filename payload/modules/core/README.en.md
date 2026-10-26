@@ -42,8 +42,9 @@ committed to git.
 ## How to work
 
 - Give the Agent tasks as usual. It checks Knowledge before making decisions, wraps up at the end of a
-  session (skill `wrap-up`) and offers to commit the results.
-- The Agent commits only when you ask.
+  session (skill `wrap-up`) and offers to take up nearby reminders, plans and tasks.
+- The Agent commits Knowledge edits right away and tells you; each commit shows which session made it.
+  Everything else it commits only when you ask.
 - Knowledge is convenient to read and edit in Obsidian: open `Knowledge/` as a vault.
 - Every now and then, ask for a review of Knowledge (skill `kb-review`) and plans (skill `plan-review`).
 - To update the project from a fresh template version, ask the Agent: "update the project from the

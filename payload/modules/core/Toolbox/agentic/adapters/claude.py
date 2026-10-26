@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-from adapters import (DECISIONS, GENERATED_NOTE, Context, dump_json, hook_command, hooks_by_event,
+from adapters import (DECISIONS, GENERATED_NOTE, Context, dump_json, hook_command, hooks_by_event, matcher_groups,
                       tier_value)
 
 
@@ -56,14 +56,16 @@ def _settings(ctx: Context) -> dict[str, dict[str, Any]]:
         template = hooks["command"]
         native: dict[str, list] = {}
         for event, items in grouped.items():
-            handlers = []
-            for hook in items:
-                handler: dict[str, Any] = {"type": "command",
-                                           "command": hook_command(template, hook, ctx)}
-                if hooks.get("timeout"):
-                    handler["timeout"] = int(hooks["timeout"])
-                handlers.append(handler)
-            native[event] = [{"hooks": handlers}]
+            native[event] = []
+            for matcher, group in matcher_groups(ctx, items):
+                handlers = []
+                for hook in group:
+                    handler: dict[str, Any] = {"type": "command",
+                                               "command": hook_command(template, hook, ctx)}
+                    if hooks.get("timeout"):
+                        handler["timeout"] = int(hooks["timeout"])
+                    handlers.append(handler)
+                native[event].append({"matcher": matcher, "hooks": handlers} if matcher else {"hooks": handlers})
         docs.setdefault(hooks["target"], {})["hooks"] = native
     return docs
 

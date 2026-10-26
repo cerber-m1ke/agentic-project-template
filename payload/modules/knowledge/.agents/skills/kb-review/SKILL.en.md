@@ -23,7 +23,7 @@ Knowledge keeps only what is alive, correct and non-obvious. The review is finis
   the verdict is `ask`.
 - Delete, merge, change a status or edit an accepted decision only after the human confirms. They may
   confirm the whole list at once or item by item.
-- Do not commit: at the end offer the `kb-commit` skill.
+- Commit what you applied right away (skill `kb-commit`) and name the commits to the human.
 
 ## Verdicts
 
@@ -73,7 +73,7 @@ is `ask`. If the resource is not cloned, it is also `ask`, not `delete`.
 - **Entity.** Does the entity exist. Check paths, entry points, relations and owners. A retelling of
   the code — `shrink`. A `deprecated` entity that no longer exists — `delete`.
 - **Task.** `done` — distribute "Takeaways for Knowledge" by the rules of the `wrap-up` skill, then
-  `delete`. `active`/`blocked` without updates for 30 days — `ask`. Compare progress with commits and check
+  `delete`. `active`/`blocked` without updates for 14 days — `ask`. Compare progress with commits and check
   branches: `git -C Resources/<name> branch -a --list '<branch>'`, `git -C Resources/<name> branch --merged`.
 - **All types.** `description` reflects the gist, links are not broken and do not lead to notes being
   deleted, no duplicates, no secrets.
@@ -101,7 +101,7 @@ is `ask`. If the resource is not cloned, it is also `ask`, not `delete`.
    by hand).
 7. **Verify.** `Toolbox/tb kb lint` — no errors and no warnings about retired statuses.
    `Toolbox/tb kb stale` — only notes with the `ask` verdict remain in scope.
-8. **Wrap up.** Counts per verdict, what was applied, open questions. Offer the `kb-commit` skill.
+8. **Wrap up.** Counts per verdict, what was applied with its commits, open questions.
 
 ## Report format
 

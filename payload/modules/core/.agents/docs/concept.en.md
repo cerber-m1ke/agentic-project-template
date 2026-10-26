@@ -20,7 +20,7 @@ Principles:
   Knowledge holds only what cannot be derived from Resources and git history.
 - `tb` does the mechanics, the Agent does the meaning: interviews, analysis and writing live in skills.
 - Cheap start: at startup, only `AGENTS.md` and skill descriptions; Knowledge on demand.
-- Irreversible actions (deleting data, updates, commits) happen only with the human's confirmation.
+- Irreversible actions (deleting data, updates, commits outside `Knowledge/`) happen only with the human's confirmation.
 
 ## Structure
 
@@ -65,11 +65,13 @@ Do not edit the generated `.claude/`, `.codex/`, `.mcp.json`, `CLAUDE.md`: chang
 | Gotchas | Pitfalls: symptom, cause, workaround, how to check it still applies |
 | Plans | Ideas and postponed work |
 | Tasks | Current tasks; after `done`, the takeaways are moved to other types and the task is deleted |
+| Reminders | What to consider soon: links to notes, plans, tasks; once considered — delete |
 
 Only what is alive is kept: outdated notes are fixed, dead ones are deleted — git history keeps earlier versions.
 
-Workflow: `tb kb search` → `tb kb show` → check against Resources. Skills: `kb-lookup`, `wrap-up`,
-`kb-commit`, `kb-review`, `plan-review`; subagents `librarian`, `kb-auditor`.
+Workflow: `tb kb search` → `tb kb show` → check against Resources. End of a session: `tb kb nearby` —
+nearby reminders, plans and tasks. Skills: `kb-lookup`, `wrap-up`, `kb-commit`, `kb-review`,
+`plan-review`; subagents `librarian`, `kb-auditor`.
 
 ## Agents
 
@@ -86,9 +88,13 @@ find the skill in `.agents/skills/` and read its `SKILL.md`. Adapters: `tb agent
 - Agent settings inside resources (`.claude/settings.json`, `.mcp.json`, `.codex/`, skills) are not
   loaded by an agent started in the root — what the project needs moves into `.agents/`
   (`tb resources status` lists them).
-- Commits — on request, with explicit paths, in the format `<scope>: <summary>`; scopes: `knowledge`,
-  `agents`, `toolbox`, `resources`, `agentic`. The pre-commit hook (`tb kb lint`, secret scan) is never
-  bypassed: no `--no-verify`, no `git commit-tree`. If it fails, fix the cause.
+- Knowledge is committed right after each edit: `tb kb commit <paths> -m "…"` — only those paths
+  (`git commit --only`), with the trailer `Agent-Session: <agent>:<id> (<title>)`. To correct a recent commit of
+  your own — `--amend`: an amend when it is HEAD, otherwise a `fixup!` that `tb kb squash` folds in.
+  Pushed commits are never rewritten. The `kb-track` and `kb-uncommitted` hooks catch forgotten edits.
+- Other commits — on request, with explicit paths, in the format `<scope>: <summary>`; scopes:
+  `knowledge`, `agents`, `toolbox`, `resources`, `agentic`. The pre-commit hook (`tb kb lint`, secret
+  scan) is never bypassed: no `--no-verify`, no `git commit-tree`. If it fails, fix the cause.
 
 ## Lifecycle
 

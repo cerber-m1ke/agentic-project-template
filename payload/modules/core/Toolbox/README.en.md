@@ -23,6 +23,9 @@ in the output are relative to the project root.
 | `tb kb new <type> <slug> [--title T] [--description D] [--folder]` | New note from `Knowledge/_templates/` |
 | `tb kb index [--base DIR]`, `tb kb lint [--staged]`, `tb kb stale` | Index; validation of Knowledge and `AGENTS.md` (`--staged` — what goes into the commit); candidates for re-verification |
 | `tb kb verify [--date YYYY-MM-DD] [--dry-run] <path\|slug>…` | Mark notes as verified: `verified` = today (or `--date`), then lint them |
+| `tb kb nearby [<path\|slug>…] [--query TEXT] [--resource R]` | Reminders, open plans and tasks close to the context (end of a session) |
+| `tb kb commit <paths>… -m "…" [--amend]`, `tb kb squash [--dry-run]` | Commit Knowledge right after an edit, with the authoring session; fold `fixup!` commits |
+| `tb kb session [title "…"]` | The agent session as commits name it; the session title for that trailer |
 | `tb secrets scan [--staged] [paths…]` | Secret scan |
 | `tb agents list\|link\|unlink\|doctor` | Agent adapters on this machine |
 | `tb resources status\|clone\|add\|set` | Resources: status, cloning, adding and editing catalog entries |

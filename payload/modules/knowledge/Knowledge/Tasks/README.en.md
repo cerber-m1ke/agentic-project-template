@@ -18,7 +18,7 @@ for Knowledge. With it, work continues in a new session, with another Agent or a
 - `active` — in progress; `blocked` — waiting on something external (record the reason under "Progress").
 - `done` — finished; takeaways are distributed to Decisions, Gotchas, Entities, Examples (`wrap-up`, `kb-review`),
   then the task file is deleted with the human's consent — it remains in git history.
-- When updating progress, set `verified` to today: `active`/`blocked` tasks without updates for 30 days
+- When updating progress, set `verified` to today: `active`/`blocked` tasks without updates for 14 days
   show up in `Toolbox/tb kb stale`.
 
 Affected resources go into the `resources` field, branches into "Specification".

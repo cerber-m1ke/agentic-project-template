@@ -23,6 +23,9 @@
 | `tb kb new <type> <slug> [--title T] [--description D] [--folder]` | Новая заметка из `Knowledge/_templates/` |
 | `tb kb index [--base DIR]`, `tb kb lint [--staged]`, `tb kb stale` | Индекс; проверка Знаний и `AGENTS.md` (`--staged` — то, что войдёт в коммит); кандидаты на перепроверку |
 | `tb kb verify [--date YYYY-MM-DD] [--dry-run] <путь\|slug>…` | Отметить сверку: `verified` = сегодня (или `--date`) и проверка заметок |
+| `tb kb nearby [<путь\|slug>…] [--query TEXT] [--resource R]` | Напоминания, открытые планы и задачи рядом с контекстом (конец сессии) |
+| `tb kb commit <пути>… -m "…" [--amend]`, `tb kb squash [--dry-run]` | Коммит Знаний сразу после правки, с сессией-автором; склейка `fixup!` |
+| `tb kb session [title "…"]` | Сессия агента, как её подписывают коммиты; заголовок сессии для подписи |
 | `tb secrets scan [--staged] [пути…]` | Поиск секретов |
 | `tb agents list\|link\|unlink\|doctor` | Адаптеры агентов на этой машине |
 | `tb resources status\|clone\|add\|set` | Ресурсы: состояние, клонирование, добавление и правка записей каталога |
